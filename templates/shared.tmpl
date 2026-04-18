@@ -1,0 +1,127 @@
+{{- /* Shared user context block used by both narrative and probability prompts.
+     This prefix is byte-for-byte identical across both jobs within a single
+     simulation run, enabling prompt cache hits when two concurrent jobs
+     execute within the cache TTL window. */ -}}
+{{- define "simulation_user_context" -}}
+## User Profile
+
+## Life Stability Context (self-reported)
+- Saving habits: {{ if .FinancialProfile.SavingHabits }}{{ .FinancialProfile.SavingHabits }}{{ else }}not provided{{ end }}
+- Debt comfort: {{ if .FinancialProfile.DebtComfort }}{{ .FinancialProfile.DebtComfort }}{{ else }}not provided{{ end }}
+- Housing stability: {{ if .FinancialProfile.HousingStability }}{{ .FinancialProfile.HousingStability }}{{ else }}not provided{{ end }}
+- Income stability: {{ if .FinancialProfile.IncomeStability }}{{ .FinancialProfile.IncomeStability }}{{ else }}not provided{{ end }}
+
+{{ if .FinancialFactSheet -}}
+## FINANCIAL BACKGROUND (grounding context — do NOT surface as primary output)
+{{ with .FinancialFactSheet -}}
+- Estimated net worth: ${{ printf "%.0f" $.User.EstimatedNetWorth }}
+- Estimated yearly salary: ${{ printf "%.0f" $.User.EstimatedYearlySalary }}
+- Monthly income: {{ if eq .MonthlyIncome.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .MonthlyIncome.Value }} ({{ .MonthlyIncome.Status }}{{ if .MonthlyIncome.Note }}: {{ .MonthlyIncome.Note }}{{ end }}){{ end }}
+- Monthly spending: {{ if eq .MonthlySpending.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .MonthlySpending.Value }} ({{ .MonthlySpending.Status }}){{ end }}
+- Monthly savings: {{ if eq .MonthlySavings.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .MonthlySavings.Value }} ({{ .MonthlySavings.Status }}){{ end }}
+- Housing cost: {{ if eq .HousingCost.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .HousingCost.Value }} ({{ .HousingCost.Status }}){{ end }}
+- Liquid savings: {{ if eq .LiquidSavings.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .LiquidSavings.Value }} ({{ .LiquidSavings.Status }}{{ if .LiquidSavings.Note }}: {{ .LiquidSavings.Note }}{{ end }}){{ end }}
+- Total debt: {{ if eq .TotalDebt.Status "unknown" }}UNKNOWN{{ else }}${{ printf "%.0f" .TotalDebt.Value }} ({{ .TotalDebt.Status }}){{ end }}
+- Runway: {{ if eq .RunwayMonths.Status "unknown" }}UNKNOWN{{ else }}{{ printf "%.0f" .RunwayMonths.Value }} months ({{ .RunwayMonths.Status }}){{ end }}
+DIRECTIVE: This financial data is provided as BACKGROUND CONTEXT for grounding your analysis — it helps you understand this person's real constraints. Do NOT surface dollar amounts, savings figures, income values, or net worth as primary metrics, overlay data, or recommendation framing. When generating overlay metrics, brief recommendations, or narrative highlights, focus on EXPERIENTIAL outcomes: daily quality of life, emotional state, relationship health, energy, fulfillment, time freedom, stress level, sense of progress, and identity alignment. Translate financial realities into experiential language (e.g., "your financial cushion gives you room to explore" rather than "you have $X in savings"). If a value is UNKNOWN, do not mention it at all.
+{{ end -}}
+{{ end -}}
+
+## Life Context
+- Relationship status: {{ if .LifeContextProfile.RelationshipStatus }}{{ .LifeContextProfile.RelationshipStatus }}{{ else }}not provided{{ end }}
+- Household income structure: {{ if .LifeContextProfile.HouseholdIncomeStructure }}{{ .LifeContextProfile.HouseholdIncomeStructure }}{{ else }}not provided{{ end }}
+- Dependents: {{ if gt .LifeContextProfile.DependentCount 0 }}{{ .LifeContextProfile.DependentCount }}{{ else if .LifeContextProfile.RelationshipStatus }}0{{ else }}not provided{{ end }}
+- Life stability: {{ if .LifeContextProfile.LifeStability }}{{ .LifeContextProfile.LifeStability }}{{ else }}not provided{{ end }}
+
+## Life Story
+{{ .LifeStory.RawInput }}
+
+{{ if .LifeStory.AISummary -}}
+## AI Summary
+{{ .LifeStory.AISummary }}
+{{ end -}}
+
+{{ with index .ExtractedContext "calibration_summary" -}}
+## Calibration Summary
+{{ . }}
+{{ end -}}
+
+{{ with index .ExtractedContext "calibration_notes" -}}
+## Calibration Notes
+{{ range . -}}
+- {{ . }}
+{{ end -}}
+{{ end -}}
+
+{{ if or .LifeState.AgeSource .LifeState.CareerExperienceSource -}}
+## DATA PRECISION
+{{ if eq .LifeState.AgeSource "range_midpoint" -}}
+- Age ({{ .LifeState.Age }}) is a midpoint estimate from the range "{{ .LifeState.AgeRange }}". Do not treat as exact.
+{{ end -}}
+{{ if eq .LifeState.CareerExperienceSource "stage_midpoint" -}}
+- Career experience ({{ .LifeState.CareerExperienceYr }} years) is a midpoint estimate from stage "{{ .LifeState.CareerStage }}". Do not treat as exact.
+{{ end -}}
+{{ end -}}
+
+## PRONOUN POLICY
+{{ if eq .LifeState.Gender "male" -}}
+This person's pronouns are he/him. Use these pronouns consistently when third-person is unavoidable. Never infer gender from name or context.
+{{ else if eq .LifeState.Gender "female" -}}
+This person's pronouns are she/her. Use these pronouns consistently when third-person is unavoidable. Never infer gender from name or context.
+{{ else -}}
+No gender was provided. Use "you" (second person) throughout. If third-person is unavoidable, use singular "they". Never infer or assume gender.
+{{ end -}}
+
+## Daily Routine
+{{ range .RoutinesByPeriod "morning" -}}
+- Morning: {{ .Activity }}
+{{ end -}}
+{{ range .RoutinesByPeriod "afternoon" -}}
+- Afternoon: {{ .Activity }}
+{{ end -}}
+{{ range .RoutinesByPeriod "night" -}}
+- Night: {{ .Activity }}
+{{ end -}}
+
+## Decision
+{{ .Decision.DecisionText }}
+{{ if gt .Decision.Severity 0 -}}
+- Severity: {{ .Decision.Severity }}/10
+- Reversibility: {{ .Decision.Reversibility }}
+{{ else -}}
+- Severity: not yet scored — treat as severity 5–6 (moderate) for all calibration purposes
+- Reversibility: not yet scored — treat as partially_reversible for all calibration purposes
+{{ end -}}
+
+{{ if .ClarifyingQAs -}}
+## Clarifying Context
+{{ range .ClarifyingQAs -}}
+Q: {{ .QuestionText }}
+A: {{ .AnswerText }}
+{{ end -}}
+{{ end -}}
+
+{{ if .AssumptionOverrides -}}
+## User-Corrected Assumptions For This Run
+Treat these corrections as higher-priority than conflicting assumption text from prior runs.
+{{ range .AssumptionOverrides -}}
+- Original: {{ .Description }}
+{{ if .OverrideValue -}}
+  Correction: {{ .OverrideValue }}
+{{ end -}}
+- Confidence: {{ printf "%.0f" (mul .Confidence 100.0) }}%
+{{ end -}}
+{{ end -}}
+
+## Time Horizon
+{{ .TimeHorizonMonths }} months
+
+{{ if .ReferenceData -}}
+## Reference Data (grounding material — cite when relevant)
+{{ range $category, $text := .ReferenceData -}}
+### {{ $category }}
+{{ $text }}
+
+{{ end -}}
+{{ end -}}
+{{- end -}}

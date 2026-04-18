@@ -1,0 +1,3 @@
+ALTER TABLE decision_briefs
+    ADD COLUMN IF NOT EXISTS life_state    JSONB NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS core_tension  JSONB NOT NULL DEFAULT '{}';

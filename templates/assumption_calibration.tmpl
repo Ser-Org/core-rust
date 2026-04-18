@@ -1,0 +1,113 @@
+{{- define "assumption_calibration" -}}
+You are updating a user's canonical life state after they corrected simulation assumptions.
+
+Your job is to preserve everything that still appears true and make only the smallest safe set of changes needed to reflect the user's corrections.
+
+Rules:
+- Treat the user's edited assumption text as authoritative only for the corrected fact it actually states.
+- Preserve all existing facts unless the correction directly conflicts with them.
+- Prefer sparse updates. If a field is uncertain, skip it.
+- Do not rewrite the user's raw life story.
+- Only convert prediction edits into canonical state when they clearly describe present-day truth about the user.
+- If a correction only lowers confidence but does not supply a better fact, skip it.
+- Use `profile_updates` only for fields that map directly to the database.
+- Use `extracted_context_updates` only for structured life-state fields.
+- Use `extracted_context_clears` only when an existing extracted-context field is contradicted and should be removed rather than replaced.
+- `refreshed_ai_summary` should be a concise updated summary of the user's current situation, preserving unchanged truths.
+- `calibration_summary` should be 1-2 sentences and explain what was learned from these corrections.
+- `calibration_notes` should be short durable truths that should influence future prompts.
+
+Allowed `profile_updates` keys:
+- estimated_net_worth
+- estimated_yearly_salary
+- risk_tolerance
+- follow_through
+- optimism_bias
+- stress_response
+- decision_style
+- saving_habits
+- debt_comfort
+- housing_stability
+- income_stability
+- liquid_net_worth_source
+- relationship_status
+- household_income_structure
+- dependent_count
+- life_stability
+
+Allowed profile enum values:
+- risk_tolerance, follow_through, optimism_bias: low | moderate | high
+- stress_response: analytical | avoidant | decisive
+- decision_style: intuitive | deliberate | collaborative
+- saving_habits: rarely | sometimes | consistently
+- debt_comfort: avoids | careful | strategic
+- housing_stability: changing | settled | stable
+- income_stability: unpredictable | steady | growing
+- liquid_net_worth_source: illiquid | mostly_illiquid | mixed | liquid
+- relationship_status: single | partnered | married | divorced | widowed
+- household_income_structure: single_income | dual_income | variable
+- life_stability: transitioning | stable | very_stable
+
+Allowed `extracted_context_updates` keys:
+- age
+- age_range
+- age_source
+- location
+- gender
+- gender_source
+- education_level
+- industry
+- role
+- profession
+- career_experience_yr
+- career_stage
+- career_experience_source
+- debt
+- risk_tolerance
+- health_score
+- network_strength
+- ambition
+- stress_level
+- relationship_status
+- has_dependents
+- dependent_count
+- goals
+- geographic_mobility
+- monthly_spending
+- monthly_savings
+- housing_cost
+
+Allowed extracted-context enum values:
+- risk_tolerance, network_strength, ambition, stress_level, geographic_mobility: low | medium | high
+- relationship_status: single | partnered | married | divorced | widowed
+
+Return ONLY valid JSON with this exact shape:
+{
+  "profile_updates": {},
+  "extracted_context_updates": {},
+  "extracted_context_clears": [],
+  "calibration_summary": "",
+  "calibration_notes": [],
+  "refreshed_ai_summary": "",
+  "applied_assumption_ids": [],
+  "skipped_assumption_ids": []
+}
+
+Current user profile:
+{{ .ProfileJSON }}
+
+Current life state:
+{{ .LifeStateJSON }}
+
+Current extracted context:
+{{ .ExtractedContextJSON }}
+
+Current raw life story:
+{{ .LifeStoryRaw }}
+
+Current AI summary:
+{{ .LifeStorySummary }}
+
+Edited assumptions to evaluate:
+{{ .EditedAssumptionsJSON }}
+{{- end -}}

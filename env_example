@@ -1,0 +1,141 @@
+# Scout Core environment example
+# Copy this file to `.env` for local development.
+#
+# Production simulation shape is fixed in code:
+# - 2 paths
+# - 3 phases per path
+# - 6 total clips
+# - 6 seconds per clip
+#
+# `SCENARIO_PLANNER_DEV_PHASE_COUNT` and `SIMULATION_VIDEO_CLIP_DURATION_SECS`
+# are only honored when the runtime environment resolves to development.
+#
+# If Stripe is left unconfigured locally, checkout and portal flows stay off,
+# but billing entitlement enforcement is also disabled so real backend
+# simulations can still run.
+
+# Preferred explicit runtime marker for local development.
+APP_ENV=development
+
+# Optional alternate runtime markers also recognized by the backend.
+# These are usually platform-managed in deployed environments.
+ENVIRONMENT=
+GO_ENV=
+NODE_ENV=
+VERCEL_ENV=
+
+# Public app URL used for Stripe redirects and runtime-environment fallback.
+APP_URL=http://localhost:3000
+
+# HTTP port for the backend server.
+PORT=8080
+
+# Log level for structured backend logs.
+LOG_LEVEL=info
+
+# Required PostgreSQL connection string.
+DATABASE_URL=postgres://scout:scout@localhost:5432/scout?sslmode=disable
+
+# Required Supabase base URL.
+SUPABASE_URL=http://127.0.0.1:54321
+
+# Required Supabase service-role key.
+SUPABASE_SERVICE_KEY=
+
+# Required Supabase JWT secret used for auth verification.
+SUPABASE_JWT_SECRET=
+
+# Text generation provider. Options: mock, ollama, claude.
+TEXT_PROVIDER=mock
+
+# Video generation provider. Options: mock, runway.
+# Runway also serves as the image provider when enabled.
+VIDEO_PROVIDER=mock
+
+# Flash image provider (the "what if" pipeline). Options: flux, gen4_image, mock.
+# Default: flux (uses BFL flux-2-max; falls back to mock when BFL_API_KEY is empty).
+# gen4_image uses Runway's gen4_image model and requires RUNWAY_API_KEY.
+FLASH_PROVIDER=flux
+
+# Claude API key. Required only when TEXT_PROVIDER=claude.
+CLAUDE_API_KEY=
+
+# Ollama base URL. Used only when TEXT_PROVIDER=ollama.
+OLLAMA_URL=http://localhost:11434
+
+# Ollama model name. Used only when TEXT_PROVIDER=ollama.
+OLLAMA_MODEL=llama3:8b
+
+# Runway API key. Required when VIDEO_PROVIDER=runway or FLASH_PROVIDER=gen4_image.
+RUNWAY_API_KEY=
+
+# Black Forest Labs API key for Flux 2 image generation (the "what if" / Flash
+# pipeline). Leave blank to fall back to the mock Flash provider — useful for
+# local development without burning credits. Required in production.
+BFL_API_KEY=
+
+# S3-compatible storage endpoint for generated media.
+S3_ENDPOINT=http://127.0.0.1:54321/storage/v1/s3
+
+# S3 access key. Leave blank when your local storage setup does not require one.
+S3_ACCESS_KEY=
+
+# S3 secret key. Leave blank when your local storage setup does not require one.
+S3_SECRET_KEY=
+
+# Bucket for generated media assets.
+S3_BUCKET=scout-media
+
+# Bucket for generated character palettes (triptych reference sheets produced
+# by the character_plate job).
+CHARACTER_PALETTES_BUCKET=character-palettes
+
+# Bucket for Flash "what-if" image generations (single-image Flux outputs keyed
+# per user/flash-id). Consumed by the flash handlers and worker.
+FLASH_IMAGES_BUCKET=flash-images
+
+# Bucket for Flash TTS / audio assets. Reserved for future flash audio work;
+# currently referenced only during app-state construction.
+FLASH_AUDIO_BUCKET=flash-audio
+
+# Region label for S3-compatible storage. Cosmetic for Supabase Storage
+# (required by the S3 SDK but not meaningful locally).
+S3_REGION=local
+
+# Enable retries for text jobs. Useful with real providers.
+LLM_RETRY_ENABLED=false
+
+# Log prompt/response interactions for AI providers. Keep false unless debugging.
+LOG_LLM_INTERACTIONS=false
+
+# Development-only phase override. Leave 0 for the standard product shape.
+# Set 2 locally if you want 2 phases per path and 4 total clips while iterating.
+SCENARIO_PLANNER_DEV_PHASE_COUNT=0
+
+# Development-only clip duration override in seconds.
+# Production always stays fixed at 6 seconds per clip.
+SIMULATION_VIDEO_CLIP_DURATION_SECS=6
+
+# Stripe secret key. Leave blank locally to disable Stripe billing flows.
+STRIPE_SECRET_KEY=
+
+# Stripe webhook signing secret. Required only when receiving real webhooks.
+STRIPE_WEBHOOK_SECRET=
+
+# Stripe recurring price ID for Starter ($29/month).
+STRIPE_STARTER_PRICE_ID=
+
+# Stripe recurring price ID for Pro ($79/month).
+STRIPE_PRO_PRICE_ID=
+
+# Stripe recurring price ID for Family ($179/month).
+STRIPE_FAMILY_PRICE_ID=
+
+# Stripe one-time price ID for extra cinematic sims ($10 each).
+STRIPE_EXTRA_CINEMATIC_PRICE_ID=
+
+# Resend API key for working-session checkpoint reminder emails.
+RESEND_API_KEY=
+
+# Sender identity for checkpoint reminder emails.
+EMAIL_FROM_ADDRESS=Scout <no-reply@scout.local>

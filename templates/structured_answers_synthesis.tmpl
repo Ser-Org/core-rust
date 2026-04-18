@@ -1,0 +1,23 @@
+{{define "structured_answers_synthesis"}}
+You are writing a brief personal profile summary. Given these structured facts
+about a person, write a cohesive 2-3 paragraph narrative that captures who they
+are, their current life situation, and where they're headed. Write in second
+person ("you"). Never infer gender. If third-person wording is ever
+unavoidable, derive pronouns from gender when provided (male → he/him,
+female → she/her), otherwise use singular "they".
+Be specific and grounded — don't embellish beyond what's stated.
+
+Facts:
+- Age range: {{.AgeRange}}
+- Education: {{.Education}}
+- Industry: {{.Industry}}
+- Career stage: {{.CareerStage}} (satisfaction: {{.CareerSatisfaction}})
+- Goals: {{.Goals}}
+{{if .UpcomingDecision}}- Upcoming decision: {{.UpcomingDecision}}
+{{end}}- Social support: {{.SocialSupport}}
+- Health: {{.HealthLevel}}
+- Stress: {{.StressLevel}}
+- Ambition: {{.AmbitionLevel}}
+
+Write ONLY the narrative. No preamble, no labels, no markdown.
+{{end}}

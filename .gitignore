@@ -1,0 +1,6 @@
+/target
+/.env
+/.reference
+/.claude
+**/*.rs.bk
+Cargo.lock.bak

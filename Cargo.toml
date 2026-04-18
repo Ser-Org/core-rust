@@ -1,0 +1,92 @@
+[package]
+name = "scout-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+name = "scout_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scout-core"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "multipart", "matched-path"] }
+axum-extra = { version = "0.9", features = ["typed-header", "cookie"] }
+tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit", "normalize-path"] }
+hyper = "1.4"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate", "bigdecimal"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value", "preserve_order"] }
+serde_urlencoded = "0.7"
+
+# Errors
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"], default-features = false }
+url = "2.5"
+
+# JWT
+jsonwebtoken = "9.3"
+
+# Image processing
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# Bytes
+bytes = "1.7"
+base64 = "0.22"
+hex = "0.4"
+
+# Env
+dotenvy = "0.15"
+
+# Rand
+rand = "0.8"
+
+# Templates
+regex = "1.10"
+
+# Concurrency primitives
+parking_lot = "0.12"
+dashmap = "6.1"
+
+# MIME
+mime = "0.3"
+mime_guess = "2.0"
+
+# Signatures
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
