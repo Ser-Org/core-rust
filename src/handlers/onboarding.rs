@@ -4,11 +4,11 @@ use crate::jobs::{self, CharacterPlateArgs, LifeStateExtractionArgs, KIND_CHARAC
 use crate::jobs::worker::CHARACTER_PLATE_PROMPT;
 use crate::media;
 use crate::middleware::AuthUser;
-use crate::models::{self, LifeStory, Routine, UserPhoto};
+use crate::models::{self, LifeStory, UserPhoto};
 use crate::prompts::{self, SimulationContext};
 use crate::providers::TextRequest;
 use axum::{
-    extract::{Extension, Multipart, Path, Query, State},
+    extract::{Extension, Multipart, State},
     http::StatusCode,
     response::Response,
     Json,
@@ -106,46 +106,12 @@ pub async fn post_life_story(
         )
         .await;
 
-    // Generate clarifying questions synchronously.
-    let mut sctx = SimulationContext::default();
-    sctx.life_story = Some(story.clone());
-    if let Ok(ls) = state.user_repo.build_life_state(user_id).await {
-        sctx.life_state = ls;
-    }
-    let (sys, user) = state.prompt_builder.build_text_prompt(prompts::TASK_ONBOARDING_QUESTIONS, &sctx);
-    let resp = state
-        .text_provider
-        .generate_text(&TextRequest {
-            system_prompt: sys,
-            user_prompt: user,
-            max_tokens: 2000,
-            temperature: 0.4,
-            json_mode: true,
-            ..Default::default()
-        })
-        .await;
-    let mut questions: Vec<JsonValue> = vec![];
-    match &resp {
-        Ok(r) => {
-            if let Ok(parsed) = serde_json::from_str::<JsonValue>(&r.content) {
-                if let Some(arr) = parsed.get("questions").and_then(|v| v.as_array()) {
-                    questions = arr.clone();
-                }
-            } else {
-                tracing::warn!(user_id = %user_id, "onboarding.life-story: AI returned unparseable JSON");
-            }
-        }
-        Err(e) => {
-            tracing::warn!(user_id = %user_id, error = ?e, "onboarding.life-story: AI generation failed; returning empty question list");
-        }
-    }
     tracing::info!(
         user_id = %user_id,
         story_id = %persisted_id,
-        question_count = questions.len(),
-        "onboarding.life-story: persisted, questions generated"
+        "onboarding.life-story: persisted"
     );
-    write_json(StatusCode::OK, json!({"life_story_id": persisted_id, "ai_questions": questions}))
+    write_json(StatusCode::OK, json!({"life_story_id": persisted_id}))
 }
 
 #[derive(Deserialize)]
@@ -183,179 +149,6 @@ pub async fn post_identity(
     }
     tracing::info!(user_id = %user_id, "onboarding.identity: saved");
     write_json(StatusCode::OK, json!({"status": "ok"}))
-}
-
-#[derive(Deserialize)]
-pub struct QuestionAnswer {
-    pub question_text: String,
-    pub answer_text: String,
-    #[serde(default)]
-    pub answer_method: String,
-}
-
-#[derive(Deserialize)]
-pub struct QuestionsReq {
-    pub answers: Vec<QuestionAnswer>,
-}
-
-pub async fn post_questions(
-    State(state): State<AppState>,
-    Extension(AuthUser(user_id)): Extension<AuthUser>,
-    Json(req): Json<QuestionsReq>,
-) -> Response {
-    if req.answers.is_empty() {
-        return write_error(StatusCode::BAD_REQUEST, "answers are required");
-    }
-
-    // Synthesize the answers into extracted_context + ai_summary.
-    let mut sctx = SimulationContext::default();
-    // Create clarifying_qas from the raw answers for the synthesis prompt.
-    let qas: Vec<models::ClarifyingQuestion> = req
-        .answers
-        .iter()
-        .enumerate()
-        .map(|(i, a)| models::ClarifyingQuestion {
-            id: Uuid::new_v4(),
-            decision_id: Uuid::nil(),
-            question_text: a.question_text.clone(),
-            answer_text: a.answer_text.clone(),
-            answer_method: if a.answer_method.is_empty() { "text".into() } else { a.answer_method.clone() },
-            sort_order: i as i32,
-            created_at: chrono::Utc::now(),
-        })
-        .collect();
-    sctx.clarifying_qas = qas;
-
-    let (sys, user) = state.prompt_builder.build_text_prompt(prompts::TASK_STRUCTURED_SYNTHESIS, &sctx);
-    let r = state
-        .text_provider
-        .generate_text(&TextRequest {
-            system_prompt: sys,
-            user_prompt: user,
-            max_tokens: 2000,
-            temperature: 0.3,
-            json_mode: true,
-            ..Default::default()
-        })
-        .await;
-    if let Ok(resp) = r {
-        if let Ok(parsed) = serde_json::from_str::<JsonValue>(&resp.content) {
-            let summary = parsed.get("ai_summary").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let extracted = parsed.get("extracted_context").cloned().unwrap_or(JsonValue::Null);
-            let story = LifeStory {
-                id: Uuid::new_v4(),
-                user_id,
-                raw_input: req.answers.iter().map(|a| format!("Q: {}\nA: {}", a.question_text, a.answer_text)).collect::<Vec<_>>().join("\n\n"),
-                input_method: "questions".into(),
-                ai_summary: summary,
-                extracted_context: extracted,
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
-            };
-            let _ = state.user_repo.upsert_life_story(&story).await;
-        }
-    }
-    let _ = state
-        .user_repo
-        .update_onboarding_status(user_id, models::onboarding_status::STRUCTURED_ANSWERS_COMPLETED)
-        .await;
-    write_json(StatusCode::OK, json!({"status": "ok"}))
-}
-
-#[derive(Deserialize)]
-pub struct RoutineConfirmation {
-    pub routine_id: Uuid,
-    pub confirmed: bool,
-}
-
-#[derive(Deserialize)]
-pub struct RoutinesConfirmReq {
-    pub confirmations: Vec<RoutineConfirmation>,
-}
-
-pub async fn post_routines_confirm(
-    State(state): State<AppState>,
-    Extension(AuthUser(user_id)): Extension<AuthUser>,
-    Json(req): Json<RoutinesConfirmReq>,
-) -> Response {
-    for c in &req.confirmations {
-        if let Err(e) = state.user_repo.update_routine_confirmation(c.routine_id, c.confirmed).await {
-            tracing::error!(error = ?e, "post_routines_confirm: failed to update routine");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update routine");
-        }
-    }
-    let _ = state
-        .user_repo
-        .update_onboarding_status(user_id, models::onboarding_status::ROUTINES_CONFIRMED)
-        .await;
-    write_json(StatusCode::OK, json!({"status": "ok"}))
-}
-
-pub async fn post_infer_routines(
-    State(state): State<AppState>,
-    Extension(AuthUser(user_id)): Extension<AuthUser>,
-) -> Response {
-    let story = state.user_repo.get_life_story_by_user_id(user_id).await.ok();
-    let mut sctx = SimulationContext::default();
-    sctx.life_story = story;
-    if let Ok(ls) = state.user_repo.build_life_state(user_id).await {
-        sctx.life_state = ls;
-    }
-    let (sys, user) = state.prompt_builder.build_text_prompt(prompts::TASK_ROUTINE_INFERENCE, &sctx);
-    let r = state
-        .text_provider
-        .generate_text(&TextRequest {
-            system_prompt: sys,
-            user_prompt: user,
-            max_tokens: 1500,
-            temperature: 0.5,
-            json_mode: true,
-            ..Default::default()
-        })
-        .await;
-    let parsed: JsonValue = match r.and_then(|resp| serde_json::from_str(&resp.content).map_err(|e| e.into())) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(error = ?e, "post_infer_routines: failed to infer routines");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to infer routines");
-        }
-    };
-
-    // Clear existing routines.
-    let _ = state.user_repo.delete_routines_by_user_id(user_id).await;
-
-    let mut grouped: std::collections::HashMap<String, Vec<Routine>> = std::collections::HashMap::new();
-    for key in ["morning", "afternoon", "night"] {
-        grouped.insert(key.into(), vec![]);
-    }
-    for period in ["morning", "afternoon", "night"] {
-        if let Some(arr) = parsed.get(period).and_then(|v| v.as_array()) {
-            for (i, item) in arr.iter().enumerate() {
-                if let Some(activity) = item.as_str() {
-                    let r = Routine {
-                        id: Uuid::new_v4(),
-                        user_id,
-                        period: period.to_string(),
-                        activity: activity.to_string(),
-                        confirmed: false,
-                        sort_order: i as i32,
-                        created_at: chrono::Utc::now(),
-                    };
-                    grouped.entry(period.into()).or_default().push(r);
-                }
-            }
-        }
-    }
-
-    let mut all: Vec<Routine> = vec![];
-    for v in grouped.values() {
-        all.extend(v.clone());
-    }
-    if let Err(e) = state.user_repo.bulk_insert_routines(&all).await {
-        tracing::error!(error = ?e, "post_infer_routines: failed to save routines");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save routines");
-    }
-    write_json(StatusCode::OK, json!({"routines": grouped}))
 }
 
 pub async fn post_photo(

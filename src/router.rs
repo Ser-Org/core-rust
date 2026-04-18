@@ -40,10 +40,7 @@ pub fn build_router(state: AppState, auth_cfg: AuthConfig) -> Router {
         // Onboarding
         .route("/api/v1/onboarding/path", post(onboarding::post_onboarding_path))
         .route("/api/v1/onboarding/life-story", post(onboarding::post_life_story))
-        .route("/api/v1/onboarding/questions", post(onboarding::post_questions))
         .route("/api/v1/onboarding/identity", post(onboarding::post_identity))
-        .route("/api/v1/onboarding/routines/infer", post(onboarding::post_infer_routines))
-        .route("/api/v1/onboarding/routines/confirm", post(onboarding::post_routines_confirm))
         .route("/api/v1/onboarding/photo", post(onboarding::post_photo))
         .route("/api/v1/onboarding/complete", post(onboarding::post_complete))
         .route("/api/v1/onboarding/suggested-decision", get(onboarding::get_suggested_decision))

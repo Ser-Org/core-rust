@@ -1215,11 +1215,6 @@ async fn load_simulation_context(
         .await
         .unwrap_or_else(|_| models::LifeState::default_state());
     let decision = state.decision_repo.get_decision_by_id(sim.decision_id).await.ok();
-    let qas = state
-        .decision_repo
-        .get_clarifying_questions_by_decision_id(sim.decision_id)
-        .await
-        .unwrap_or_default();
 
     let behavioral = crate::models::resolve_behavioral_profile(&profile);
     let financial_profile = crate::models::resolve_financial_profile(&profile);
@@ -1236,7 +1231,6 @@ async fn load_simulation_context(
     ctx.life_state = life_state;
     ctx.life_story = story;
     ctx.decision = decision.clone();
-    ctx.clarifying_qas = qas;
     ctx.time_horizon_months = decision.map(|d| d.time_horizon_months).unwrap_or(12);
     ctx.video_clip_duration_secs = state.cfg.simulation_video_clip_duration_secs;
     if state.cfg.is_development() && state.cfg.scenario_planner_dev_phase_count > 0 {

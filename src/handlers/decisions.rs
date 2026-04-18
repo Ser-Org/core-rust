@@ -2,9 +2,7 @@ use crate::app_state::AppState;
 use crate::handlers::{write_billing_error, write_error, write_json};
 use crate::jobs::{self, ScenarioPlannerArgs};
 use crate::middleware::AuthUser;
-use crate::models::{self, ClarifyingQuestion, Decision, DecisionSimulation};
-use crate::prompts::{self, SimulationContext};
-use crate::providers::TextRequest;
+use crate::models::{self, Decision, DecisionSimulation};
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
@@ -61,98 +59,18 @@ pub async fn post_decision(
         tracing::error!(user_id = %user_id, error = ?e, "decisions.create: failed to persist decision");
         return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create decision");
     }
-    tracing::debug!(decision_id = %decision.id, "decisions.create: persisted, generating clarifying questions");
-
-    // Generate clarifying questions synchronously.
-    let profile = state.user_repo.get_profile_by_user_id(user_id).await.ok();
-    let life_state = state.user_repo.build_life_state(user_id).await.unwrap_or_else(|_| models::LifeState::default_state());
-    let life_story = state.user_repo.get_life_story_by_user_id(user_id).await.ok();
-    let mut sctx = SimulationContext::default();
-    sctx.user = profile.clone();
-    sctx.life_state = life_state;
-    sctx.life_story = life_story;
-    sctx.decision = Some(decision.clone());
-    sctx.time_horizon_months = time_horizon;
-
-    let (sys, user) = state.prompt_builder.build_text_prompt(prompts::TASK_ONBOARDING_QUESTIONS, &sctx);
-    let r = state
-        .text_provider
-        .generate_text(&TextRequest {
-            system_prompt: sys,
-            user_prompt: user,
-            max_tokens: 2500,
-            temperature: 0.5,
-            json_mode: true,
-            ..Default::default()
-        })
-        .await;
-    let mut questions: Vec<ClarifyingQuestion> = vec![];
-    if let Ok(resp) = r {
-        if let Ok(parsed) = serde_json::from_str::<JsonValue>(&resp.content) {
-            if let Some(arr) = parsed.get("questions").and_then(|v| v.as_array()) {
-                for (i, q) in arr.iter().enumerate() {
-                    if let Some(text) = q.get("question_text").and_then(|v| v.as_str()) {
-                        questions.push(ClarifyingQuestion {
-                            id: Uuid::new_v4(),
-                            decision_id: decision.id,
-                            question_text: text.to_string(),
-                            answer_text: String::new(),
-                            answer_method: String::new(),
-                            sort_order: q.get("sort_order").and_then(|v| v.as_i64()).unwrap_or((i + 1) as i64) as i32,
-                            created_at: chrono::Utc::now(),
-                        });
-                    }
-                }
-            }
-            if let Some(cat) = parsed.get("category").and_then(|v| v.as_str()) {
-                let _ = state.decision_repo.update_category(decision.id, cat).await;
-            }
-            let severity = parsed.get("severity").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let reversibility = parsed
-                .get("reversibility")
-                .and_then(|v| v.as_str())
-                .unwrap_or("reversible_with_cost");
-            let _ = state
-                .decision_repo
-                .update_severity_and_reversibility(decision.id, severity, reversibility)
-                .await;
-        }
-    }
-    let question_count = questions.len();
-    if let Err(e) = state.decision_repo.bulk_insert_clarifying_questions(&questions).await {
-        tracing::warn!(error = ?e, decision_id = %decision.id, "decisions.create: failed to persist clarifying questions");
-    }
-    let _ = state
-        .decision_repo
-        .update_decision_status(decision.id, models::decision_status::CLARIFYING)
-        .await;
-    tracing::info!(
-        decision_id = %decision.id,
-        question_count,
-        "decisions.create: created with clarifying questions"
-    );
+    tracing::info!(decision_id = %decision.id, "decisions.create: persisted");
 
     write_json(
         StatusCode::CREATED,
-        json!({ "decision_id": decision.id, "clarifying_questions": questions }),
+        json!({ "decision_id": decision.id }),
     )
 }
 
 #[derive(Deserialize)]
-pub struct PostAnswer {
-    pub question_id: Uuid,
-    pub answer_text: String,
-    #[serde(default)]
-    pub answer_method: String,
-}
-
-#[derive(Deserialize)]
 pub struct PostAnswersReq {
-    pub answers: Vec<PostAnswer>,
     #[serde(default)]
     pub time_horizon_months: i32,
-    #[serde(default)]
-    pub skip_questions: bool,
 }
 
 pub async fn post_answers(
@@ -164,10 +82,8 @@ pub async fn post_answers(
     tracing::info!(
         user_id = %user_id,
         decision_id = %decision_id,
-        answer_count = req.answers.len(),
         time_horizon_months = req.time_horizon_months,
-        skip_questions = req.skip_questions,
-        "decisions.answers: submitting answers and dispatching simulation"
+        "decisions.answers: dispatching simulation"
     );
     if req.time_horizon_months > 0 {
         if let Err(e) = state
@@ -177,39 +93,6 @@ pub async fn post_answers(
         {
             tracing::error!(decision_id = %decision_id, error = ?e, "decisions.answers: failed to update time horizon");
             return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update time horizon");
-        }
-    }
-
-    let qs = match state.decision_repo.get_clarifying_questions_by_decision_id(decision_id).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!(decision_id = %decision_id, error = ?e, "decisions.answers: failed to load clarifying questions");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to load clarifying questions");
-        }
-    };
-    let valid_ids: std::collections::HashSet<Uuid> = qs.iter().map(|q| q.id).collect();
-    for a in &req.answers {
-        if !valid_ids.contains(&a.question_id) {
-            return write_error(StatusCode::BAD_REQUEST, "question does not belong to this decision");
-        }
-        let method = if a.answer_method.is_empty() { "text" } else { &a.answer_method };
-        if let Err(e) = state
-            .decision_repo
-            .update_clarifying_answer(a.question_id, &a.answer_text, method)
-            .await
-        {
-            tracing::error!(error = ?e, "post_answers: failed to save answer");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save answer");
-        }
-    }
-
-    if !req.skip_questions && !qs.is_empty() {
-        let answered = req.answers.iter().filter(|a| !a.answer_text.is_empty()).count();
-        if answered == 0 {
-            return write_error(
-                StatusCode::BAD_REQUEST,
-                "at least one clarifying question must be answered; set skip_questions=true to bypass",
-            );
         }
     }
 
@@ -455,11 +338,6 @@ pub async fn get_decision(
             return write_error(StatusCode::NOT_FOUND, "decision not found");
         }
     };
-    let questions = state
-        .decision_repo
-        .get_clarifying_questions_by_decision_id(id)
-        .await
-        .unwrap_or_default();
-    tracing::debug!(decision_id = %id, status = %decision.status, question_count = questions.len(), "decisions.get: returning");
-    write_json(StatusCode::OK, json!({ "decision": decision, "questions": questions }))
+    tracing::debug!(decision_id = %id, status = %decision.status, "decisions.get: returning");
+    write_json(StatusCode::OK, json!({ "decision": decision }))
 }

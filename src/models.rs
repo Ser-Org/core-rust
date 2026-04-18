@@ -21,14 +21,11 @@ pub struct User {
 
 pub mod onboarding_status {
     pub const STORY_SUBMITTED: &str = "story_submitted";
-    pub const QUESTIONS_ANSWERED: &str = "questions_answered";
     pub const BEHAVIORAL_PROFILE: &str = "behavioral_profile";
     pub const LIFE_CONTEXT_COMPLETED: &str = "life_context_completed";
     pub const PROFILE_COMPLETED: &str = "profile_completed";
     pub const NET_WORTH_SOURCE_COMPLETED: &str = "net_worth_source_completed";
-    pub const ROUTINES_CONFIRMED: &str = "routines_confirmed";
     pub const COMPLETE: &str = "complete";
-    pub const STRUCTURED_ANSWERS_COMPLETED: &str = "structured_answers_completed";
 }
 
 pub mod onboarding_path {
@@ -39,12 +36,6 @@ pub mod onboarding_path {
 pub mod input_method {
     pub const TEXT: &str = "text";
     pub const VOICE: &str = "voice";
-}
-
-pub mod routine_period {
-    pub const MORNING: &str = "morning";
-    pub const AFTERNOON: &str = "afternoon";
-    pub const NIGHT: &str = "night";
 }
 
 pub mod age_bracket {
@@ -241,17 +232,6 @@ pub struct LifeStory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Routine {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub period: String,
-    pub activity: String,
-    pub confirmed: bool,
-    pub sort_order: i32,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct UserPhoto {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -302,7 +282,6 @@ pub struct CharacterPlate {
 
 pub mod decision_status {
     pub const DRAFT: &str = "draft";
-    pub const CLARIFYING: &str = "clarifying";
     pub const SIMULATING: &str = "simulating";
     pub const COMPLETED: &str = "completed";
     pub const FAILED: &str = "failed";
@@ -323,17 +302,6 @@ pub struct Decision {
     pub share_token: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct ClarifyingQuestion {
-    pub id: Uuid,
-    pub decision_id: Uuid,
-    pub question_text: String,
-    pub answer_text: String,
-    pub answer_method: String,
-    pub sort_order: i32,
-    pub created_at: DateTime<Utc>,
 }
 
 // --- Simulations ---

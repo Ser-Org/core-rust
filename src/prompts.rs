@@ -4,16 +4,11 @@
 //! prompt text, only the JSON the model returns. The earlier Go implementation
 //! used text/template files; those are gone and this module is authoritative.
 
-use crate::models::{
-    self, ClarifyingQuestion, Decision, LifeState, LifeStory, Routine, UserProfile,
-};
+use crate::models::{self, Decision, LifeState, LifeStory, UserProfile};
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
-pub const TASK_ONBOARDING_QUESTIONS: &str = "onboarding_questions";
-pub const TASK_ROUTINE_INFERENCE: &str = "routine_inference";
 pub const TASK_DASHBOARD: &str = "dashboard";
-pub const TASK_STRUCTURED_SYNTHESIS: &str = "structured_answers_synthesis";
 pub const TASK_CINEMATIC_PROMPT: &str = "cinematic_prompt";
 pub const TASK_SCENARIO_PLANNER: &str = "scenario_planner";
 pub const TASK_ASSUMPTION_EXTRACTION: &str = "assumption_extraction";
@@ -27,10 +22,8 @@ pub struct SimulationContext {
     pub life_state: LifeState,
     pub life_story: Option<LifeStory>,
     pub extracted_context: JsonValue,
-    pub routines: Vec<Routine>,
     pub photo_url: String,
     pub decision: Option<Decision>,
-    pub clarifying_qas: Vec<ClarifyingQuestion>,
     pub time_horizon_months: i32,
     pub reference_data: JsonValue,
     pub scenario_plan_path_a_label: String,
@@ -92,14 +85,11 @@ impl PromptBuilder {
         ctx: &SimulationContext,
     ) -> (String, String) {
         match task_type {
-            TASK_ONBOARDING_QUESTIONS => build_onboarding_questions(ctx),
-            TASK_ROUTINE_INFERENCE => build_routine_inference(ctx),
             TASK_DASHBOARD => build_dashboard(ctx),
             TASK_CINEMATIC_PROMPT => build_cinematic_prompt(ctx),
             TASK_SCENARIO_PLANNER => build_scenario_planner(ctx),
             TASK_ASSUMPTION_EXTRACTION => build_assumption_extraction(ctx),
             TASK_LIFE_STATE_EXTRACTION => build_life_state_extraction(ctx),
-            TASK_STRUCTURED_SYNTHESIS => build_structured_synthesis(ctx),
             TASK_ASSUMPTION_CALIBRATION => build_assumption_calibration(ctx),
             TASK_PIPELINE_PROMPT => build_pipeline_prompt(ctx),
             _ => (
@@ -158,37 +148,6 @@ fn user_context_summary(ctx: &SimulationContext) -> String {
         }
     }
     out
-}
-
-fn build_onboarding_questions(ctx: &SimulationContext) -> (String, String) {
-    let sys = r#"You are a life modeling analyst for Scout, a life decision intelligence platform. Given a user's life story and a specific decision they want to simulate, your tasks are:
-1. Generate 3–5 high-leverage clarifying questions specific to this person's story and decision.
-2. Classify the decision into exactly one of these categories: "Relocation & Lifestyle Shifts", "Housing & Major Purchases", "Career & Education Pivots", "Family, Relationships & Life Stage Changes", "Financial Milestones & Investments", "Health, Wellness & Personal Overhauls".
-3. Score severity (0-10) and reversibility ("easily_reversible"|"reversible_with_cost"|"partially_reversible"|"irreversible").
-
-Output JSON of shape:
-{"questions": [{"question_text": "...", "sort_order": 1}], "category": "...", "severity": 5, "reversibility": "..."}"#;
-    let user_ctx = user_context_summary(ctx);
-    let decision_text = ctx
-        .decision
-        .as_ref()
-        .map(|d| d.decision_text.as_str())
-        .unwrap_or("");
-    let user = format!(
-        "User context:\n{}\n\nDecision under consideration: {}\n\nReturn JSON only.",
-        user_ctx, decision_text
-    );
-    (sys.into(), user)
-}
-
-fn build_routine_inference(ctx: &SimulationContext) -> (String, String) {
-    let sys = r#"You are an onboarding assistant. Infer the user's likely daily routine from their life story.
-
-Output JSON: {"morning": ["activity 1", ...], "afternoon": ["..."], "night": ["..."]}
-Each bucket should have 3-5 specific activities. Be concrete and personalized."#;
-    let uc = user_context_summary(ctx);
-    let user = format!("Based on this user context:\n{}\n\nReturn JSON only.", uc);
-    (sys.into(), user)
 }
 
 fn build_dashboard(ctx: &SimulationContext) -> (String, String) {
@@ -318,20 +277,6 @@ Output JSON (keys optional; omit when unknown):
         .map(|s| s.raw_input.clone())
         .unwrap_or_default();
     let user = format!("Life story:\n{}\n\nReturn JSON only.", raw);
-    (sys.into(), user)
-}
-
-fn build_structured_synthesis(ctx: &SimulationContext) -> (String, String) {
-    let sys = r#"You are an onboarding assistant. Given structured answers from the user, produce a concise AI summary and extracted_context.
-
-Output JSON: {"ai_summary": "...", "extracted_context": {...}}"#;
-    let qa = ctx
-        .clarifying_qas
-        .iter()
-        .map(|q| format!("Q: {}\nA: {}", q.question_text, q.answer_text))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let user = format!("Answers:\n{}\n\nReturn JSON only.", qa);
     (sys.into(), user)
 }
 

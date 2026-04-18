@@ -252,63 +252,6 @@ impl UserRepository {
         Ok(s)
     }
 
-    pub async fn bulk_insert_routines(&self, routines: &[Routine]) -> Result<()> {
-        if routines.is_empty() {
-            return Ok(());
-        }
-        let mut tx = self.pool.begin().await?;
-        for rt in routines {
-            sqlx::query(
-                "INSERT INTO routines (id, user_id, period, activity, confirmed, sort_order, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, now())",
-            )
-            .bind(rt.id)
-            .bind(rt.user_id)
-            .bind(&rt.period)
-            .bind(&rt.activity)
-            .bind(rt.confirmed)
-            .bind(rt.sort_order)
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn update_routine_confirmation(&self, id: Uuid, confirmed: bool) -> Result<()> {
-        let res = sqlx::query("UPDATE routines SET confirmed = $1 WHERE id = $2")
-            .bind(confirmed)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
-            return Err(anyhow!("routine {} not found", id));
-        }
-        Ok(())
-    }
-
-    pub async fn get_routines_by_user_id(&self, user_id: Uuid) -> Result<Vec<Routine>> {
-        let rows = sqlx::query_as::<_, Routine>(
-            "SELECT id, user_id, period, activity, confirmed, sort_order, created_at
-             FROM routines WHERE user_id = $1
-             ORDER BY
-               CASE period WHEN 'morning' THEN 1 WHEN 'afternoon' THEN 2 WHEN 'night' THEN 3 END,
-               sort_order",
-        )
-        .bind(user_id)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
-    }
-
-    pub async fn delete_routines_by_user_id(&self, user_id: Uuid) -> Result<()> {
-        sqlx::query("DELETE FROM routines WHERE user_id = $1")
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
     pub async fn insert_user_photo(&self, photo: &UserPhoto) -> Result<()> {
         let ptype = if photo.photo_type.is_empty() {
             photo_type::FACE

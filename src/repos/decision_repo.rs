@@ -52,32 +52,6 @@ impl DecisionRepository {
         Ok(rows)
     }
 
-    pub async fn update_category(&self, id: Uuid, category: &str) -> Result<()> {
-        sqlx::query("UPDATE decisions SET category = $1, updated_at = now() WHERE id = $2")
-            .bind(category)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn update_severity_and_reversibility(
-        &self,
-        id: Uuid,
-        severity: i32,
-        reversibility: &str,
-    ) -> Result<()> {
-        sqlx::query(
-            "UPDATE decisions SET severity = $1, reversibility = $2, updated_at = now() WHERE id = $3",
-        )
-        .bind(severity)
-        .bind(reversibility)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
     pub async fn update_decision_status(&self, id: Uuid, status: &str) -> Result<()> {
         let res = sqlx::query("UPDATE decisions SET status = $1, updated_at = now() WHERE id = $2")
             .bind(status)
@@ -97,67 +71,5 @@ impl DecisionRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
-    }
-
-    pub async fn bulk_insert_clarifying_questions(
-        &self,
-        questions: &[ClarifyingQuestion],
-    ) -> Result<()> {
-        if questions.is_empty() {
-            return Ok(());
-        }
-        let mut tx = self.pool.begin().await?;
-        for q in questions {
-            sqlx::query(
-                "INSERT INTO clarifying_questions (id, decision_id, question_text, answer_text, answer_method, sort_order, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, now())",
-            )
-            .bind(q.id)
-            .bind(q.decision_id)
-            .bind(&q.question_text)
-            .bind(&q.answer_text)
-            .bind(&q.answer_method)
-            .bind(q.sort_order)
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        Ok(())
-    }
-
-    pub async fn update_clarifying_answer(
-        &self,
-        question_id: Uuid,
-        text: &str,
-        method: &str,
-    ) -> Result<()> {
-        let res = sqlx::query(
-            "UPDATE clarifying_questions SET answer_text = $1, answer_method = $2 WHERE id = $3",
-        )
-        .bind(text)
-        .bind(method)
-        .bind(question_id)
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
-            return Err(anyhow!("clarifying question {} not found", question_id));
-        }
-        Ok(())
-    }
-
-    pub async fn get_clarifying_questions_by_decision_id(
-        &self,
-        id: Uuid,
-    ) -> Result<Vec<ClarifyingQuestion>> {
-        let rows = sqlx::query_as::<_, ClarifyingQuestion>(
-            "SELECT id, decision_id, question_text, answer_text, answer_method, sort_order, created_at
-             FROM clarifying_questions
-             WHERE decision_id = $1
-             ORDER BY sort_order",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
     }
 }

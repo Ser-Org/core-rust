@@ -110,21 +110,6 @@ fn placeholder_mp4() -> &'static [u8] {
 /// extraneous keys are ignored by each parser.
 fn mock_json_response() -> String {
     let v = json!({
-        // onboarding_questions / clarifying-question generator
-        "questions": [
-            {"question_text": "Mock question 1", "sort_order": 1},
-            {"question_text": "Mock question 2", "sort_order": 2},
-            {"question_text": "Mock question 3", "sort_order": 3}
-        ],
-        "category": "Career & Education Pivots",
-        "severity": 5,
-        "reversibility": "reversible_with_cost",
-
-        // routine_inference
-        "morning": ["Exercise", "Coffee", "Deep work"],
-        "afternoon": ["Lunch", "Meetings", "Creative"],
-        "night": ["Dinner", "Project", "Sleep"],
-
         // dashboard (home snapshot — user-level, not per-decision)
         "life_quality_trajectory": {"wellbeing_curve": [{"month": 0, "value": 68}]},
         "life_momentum_score": {"score": 72, "justification": "Mock"},
