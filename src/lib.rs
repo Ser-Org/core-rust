@@ -3,7 +3,6 @@
 
 pub mod app_state;
 pub mod billing;
-pub mod causalgraph;
 pub mod config;
 pub mod db;
 pub mod error;

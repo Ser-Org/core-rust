@@ -38,7 +38,6 @@ src/
 ├── error.rs              # AppError / IntoResponse
 ├── db.rs                 # Postgres pool + migrator
 ├── objectstore.rs        # S3/Supabase Storage wrapper
-├── causalgraph.rs        # Life causal graph
 ├── prompts.rs            # Prompt builders (inline, no Go template runtime)
 ├── flash.rs              # Flash music selector
 ├── media.rs              # Image resizing helpers
@@ -52,7 +51,6 @@ src/
 ├── jobs/                 # scout_jobs-backed queue + worker dispatcher
 └── handlers/             # HTTP handlers (onboarding, decisions, flash, ...)
 migrations/               # Copied verbatim from scout-core + 100_scout_jobs
-templates/                # Copied Go templates (reference only)
 ```
 
 ## Compatibility notes
@@ -61,6 +59,5 @@ templates/                # Copied Go templates (reference only)
 - The original River queue has been replaced with a lightweight Postgres-polling
   queue named `scout_jobs` because there is no first-party Rust client for
   River. Behaviour (retries, claim under SKIP LOCKED, backoff) matches.
-- Go `text/template` prompt files are shipped in `templates/` for reference
-  but the Rust service renders equivalent prompts programmatically in
-  `src/prompts.rs` to avoid a Go-template interpreter dependency.
+- Prompts are rendered programmatically in `src/prompts.rs` — no template
+  interpreter dependency.

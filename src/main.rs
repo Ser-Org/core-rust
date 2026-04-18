@@ -1,6 +1,6 @@
 use scout_core::{
     app_state::AppState,
-    billing, causalgraph,
+    billing,
     config::Config,
     db, jobs, logging, media,
     middleware::AuthConfig,
@@ -119,7 +119,6 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let prompt_builder = Arc::new(prompts::PromptBuilder::new());
-    let causal_graph = Arc::new(causalgraph::CausalGraph::default_life_graph());
     let job_client = Arc::new(jobs::JobClient::new(pool.clone()));
 
     let billing_service = Arc::new(billing::BillingService::new(
@@ -163,7 +162,6 @@ async fn main() -> anyhow::Result<()> {
         image_provider,
         flash_image_provider,
         prompt_builder,
-        causal_graph,
         job_client,
         billing: billing_service,
         media_pipeline,

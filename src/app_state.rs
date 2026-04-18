@@ -1,6 +1,5 @@
 use crate::{
     billing::BillingService,
-    causalgraph::CausalGraph,
     config::Config,
     jobs::JobClient,
     media::MediaPipeline,
@@ -31,7 +30,6 @@ pub struct AppState {
     pub image_provider: ImageProviderRef,
     pub flash_image_provider: FlashImageProviderRef,
     pub prompt_builder: Arc<PromptBuilder>,
-    pub causal_graph: Arc<CausalGraph>,
     pub job_client: Arc<JobClient>,
     pub billing: Arc<BillingService>,
     pub media_pipeline: Arc<MediaPipeline>,

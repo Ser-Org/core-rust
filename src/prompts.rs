@@ -1,10 +1,8 @@
 //! Prompt builder. Produces system + user prompts for each generation task.
 //!
-//! The Go implementation uses text/template files; we inline equivalent
-//! prompts in Rust because the frontend never sees the prompt text — only
-//! the JSON the model returns. Templates used at runtime live in
-//! `../templates/` and can be consulted for reference, but the Rust builder
-//! is the authoritative source of truth.
+//! Prompts are inlined as Rust string literals — the frontend never sees the
+//! prompt text, only the JSON the model returns. The earlier Go implementation
+//! used text/template files; those are gone and this module is authoritative.
 
 use crate::models::{
     self, ClarifyingQuestion, Decision, LifeState, LifeStory, Routine, UserProfile,
