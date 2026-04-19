@@ -1,7 +1,8 @@
 # ---- Build stage ----
-# 1.85+ required: some transitive deps (notably moxcms via the `image` crate)
-# declare `edition2024`, which was only stabilized in Rust 1.85.
-FROM rust:1.85-bookworm AS builder
+# 1.88+ required: several transitive deps (image, time, home, icu_*) pin
+# rustc to 1.88. Edition 2024 itself stabilized in 1.85, but the dep graph
+# has moved past that.
+FROM rust:1.88-bookworm AS builder
 
 WORKDIR /app
 
