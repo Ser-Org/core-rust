@@ -96,11 +96,11 @@ async fn main() -> anyhow::Result<()> {
         _ => Arc::new(MockTextProvider::new()),
     };
     let video_provider: VideoProviderRef = match cfg.video_provider.as_str() {
-        "runway" | "veo3" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
         _ => Arc::new(MockVideoProvider::new("testdata/placeholder.mp4")),
     };
     let image_provider: ImageProviderRef = match cfg.video_provider.as_str() {
-        "runway" | "veo3" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
         _ => Arc::new(MockImageProvider::new()),
     };
     let flash_image_provider: FlashImageProviderRef = match cfg.flash_provider.as_str() {

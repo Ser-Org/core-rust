@@ -17,6 +17,7 @@ const MODEL_GEN4_ALEPH: &str = "gen4_aleph";
 const MODEL_VEO3: &str = "veo3";
 const MODEL_VEO3_1: &str = "veo3.1";
 const MODEL_VEO3_1_FAST: &str = "veo3.1_fast";
+const MODEL_SEEDANCE2: &str = "seedance2";
 const DEFAULT_I2V_RATIO: &str = "1280:720";
 const DEFAULT_VIDEO_DURATION: u32 = 5;
 const DEFAULT_TEXT_DURATION: u32 = 4;
@@ -35,8 +36,22 @@ const TEXT_TO_VIDEO_DURATIONS: &[u32] = &[4, 6, 8];
 const VEO3_I2V_RATIOS: &[&str] = &["1280:720", "720:1280", "1080:1920", "1920:1080"];
 const VEO3_FIXED_DURATION: u32 = 8;
 
+// Runway-hosted Seedance 2.0: image-to-video only, wider ratio enum, 4-15s
+// duration window, no seed/moderation/referenceImages, audio toggle exposed.
+const SEEDANCE2_I2V_RATIOS: &[&str] = &[
+    "992:432", "864:496", "752:560", "640:640", "560:752", "496:864",
+    "1470:630", "1280:720", "1112:834", "960:960", "834:1112", "720:1280",
+];
+const SEEDANCE2_MIN_DURATION: u32 = 4;
+const SEEDANCE2_MAX_DURATION: u32 = 15;
+const SEEDANCE2_DEFAULT_DURATION: u32 = 6;
+
 fn is_veo3_family(model: &str) -> bool {
     matches!(model, MODEL_VEO3 | MODEL_VEO3_1 | MODEL_VEO3_1_FAST)
+}
+
+fn is_seedance2(model: &str) -> bool {
+    model == MODEL_SEEDANCE2
 }
 
 pub struct RunwayProvider {
@@ -114,6 +129,8 @@ struct ImageToVideoRequest {
     content_moderation: ContentModeration,
     #[serde(skip_serializing_if = "Option::is_none")]
     seed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -503,6 +520,20 @@ fn validate_veo3_i2v(ratio: &str, duration: u32) -> Result<()> {
     Ok(())
 }
 
+fn validate_seedance2_i2v(ratio: &str, duration: u32) -> Result<()> {
+    validate_allowed("image_to_video[seedance2]", "ratio", ratio, SEEDANCE2_I2V_RATIOS)?;
+    if !(SEEDANCE2_MIN_DURATION..=SEEDANCE2_MAX_DURATION).contains(&duration) {
+        return Err(anyhow::Error::from(HttpError {
+            status_code: 400,
+            message: format!(
+                "image_to_video[seedance2]: invalid duration {} (expected {}-{})",
+                duration, SEEDANCE2_MIN_DURATION, SEEDANCE2_MAX_DURATION
+            ),
+        }));
+    }
+    Ok(())
+}
+
 fn validate_t2v(ratio: &str, duration: u32) -> Result<()> {
     validate_allowed("text_to_video", "ratio", ratio, TEXT_TO_VIDEO_RATIOS)?;
     if !TEXT_TO_VIDEO_DURATIONS.contains(&duration) {
@@ -697,6 +728,34 @@ impl VideoProvider for RunwayProvider {
                     duration: VEO3_FIXED_DURATION,
                     content_moderation: ContentModeration::default(),
                     seed: None,
+                    audio: None,
+                }
+            } else if is_seedance2(model) {
+                // seedance2: image-to-video only, audio explicitly off,
+                // duration sourced from caller (validated to 4-15).
+                if !req.reference_images.is_empty() {
+                    tracing::warn!(
+                        model,
+                        count = req.reference_images.len(),
+                        "runway: seedance2 does not accept referenceImages — dropping"
+                    );
+                }
+                let duration = if req.duration_secs < SEEDANCE2_MIN_DURATION {
+                    SEEDANCE2_DEFAULT_DURATION
+                } else {
+                    req.duration_secs
+                };
+                validate_seedance2_i2v(&ratio, duration)?;
+                ImageToVideoRequest {
+                    model: model.to_string(),
+                    prompt_image: req.input_image_url.clone(),
+                    prompt_text: req.prompt.clone(),
+                    reference_images: vec![],
+                    ratio,
+                    duration,
+                    content_moderation: ContentModeration::default(),
+                    seed: None,
+                    audio: Some(false),
                 }
             } else {
                 let duration = if req.duration_secs < 2 { DEFAULT_VIDEO_DURATION } else { req.duration_secs };
@@ -715,6 +774,7 @@ impl VideoProvider for RunwayProvider {
                     duration,
                     content_moderation: moderation,
                     seed: req.seed,
+                    audio: None,
                 }
             };
             self.post_task("/image_to_video", &body).await?
@@ -733,6 +793,7 @@ impl VideoProvider for RunwayProvider {
                     duration,
                     content_moderation: moderation,
                     seed: req.seed,
+                    audio: None,
                 };
                 self.post_task("/image_to_video", &body).await?
             } else {

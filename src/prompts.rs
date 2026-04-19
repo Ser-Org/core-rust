@@ -203,6 +203,8 @@ Hard constraints on every scene_prompt and motion_prompt:
 - Do NOT describe phone screens, laptop screens, monitors, TVs, or any device UI. Diffusion models render these poorly.
 - Do NOT describe visible text, signage, captions, logos, or labels. Same reason.
 - If a beat conceptually involves a device (e.g. reading a message, checking a notification, doing work on a laptop), frame it indirectly — describe the subject's posture, gaze, expression, or reaction. Never the screen content.
+- The subject is the ONLY person in every scene. Never describe other people, crowds, audiences, families, partners, colleagues, pedestrians, baristas, coworkers, children, or background figures. No people inside reflections, photos, posters, or framed pictures either. The downstream image and video models render exactly one human; any reference to additional people produces broken output.
+- If a beat conceptually involves another person (a conversation, a wedding, a meeting, a family dinner, a presentation, a date, a goodbye), reframe it as a solo moment — show the subject before or after the interaction, alone in the space, doing the preparation or carrying the aftermath, walking away from the venue, looking at an empty seat across the table, or sitting alone in the room someone has just left. Pick beats that are plausibly solitary in the first place.
 - Pronouns and gendered references must match the user's gender from the context. If Gender is male, use he/him and words like "the man"; if female, use she/her and "the woman"; if non-binary or unspecified, use they/them and "the person". Never mix pronouns for the same subject across a scene or across paths.
 
 Output JSON:
@@ -324,6 +326,8 @@ Hard constraints on scene_prompt and motion_prompt:
 - Do NOT describe phone screens, laptop screens, monitors, TVs, or any device UI. Diffusion models render these poorly.
 - Do NOT describe visible text, signage, captions, logos, or labels. Same reason.
 - If a beat conceptually involves a device (e.g. reading a message, checking a notification, doing work on a laptop), frame it indirectly — describe the subject's posture, gaze, expression, or reaction. Never the screen content.
+- The subject is the ONLY person in the scene. Never describe other people, crowds, audiences, families, partners, colleagues, pedestrians, baristas, coworkers, children, or background figures. No people inside reflections, photos, posters, or framed pictures either. The downstream image and video models render exactly one human; any reference to additional people produces broken output.
+- If the beat conceptually involves another person (a conversation, a meeting, a date), reframe it as a solo moment — the subject before or after the interaction, alone in the space, doing the preparation or carrying the aftermath. Pick a beat that is plausibly solitary in the first place.
 - Pronouns and gendered references must match the user's gender from the context. If Gender is male, use he/him and words like "the man"; if female, use she/her and "the woman"; if non-binary or unspecified, use they/them and "the person". Never mix pronouns for the same subject.
 
 Output JSON: {"scene_prompt": "...", "motion_prompt": "...", "edit_prompt": "..."}"#;

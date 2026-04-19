@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 const BASE_URL: &str = "https://api.bfl.ai/v1";
 const MAX_ENDPOINT: &str = "/flux-2-max";
-const POLL_INTERVAL: Duration = Duration::from_millis(500);
-const POLL_TIMEOUT: Duration = Duration::from_secs(600); // 10min — was 90s; Flux occasionally runs long.
+const POLL_INTERVAL: Duration = Duration::from_secs(5); // BFL job doesn't finish faster if we ask more often; tighter intervals just create log noise and BFL load.
+const POLL_TIMEOUT: Duration = Duration::from_secs(600); // 10min — was 90s; Flux occasionally runs long. Past this it's almost always queue-stuck; let the worker retry rather than wait.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120); // was 30s.
 
 pub struct FluxProvider {

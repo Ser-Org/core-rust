@@ -72,9 +72,11 @@ impl Config {
         };
         let video_provider = env_or_default("VIDEO_PROVIDER", "mock");
         // Veo3 (Runway-hosted Google Veo 3) forces an 8-second clip duration;
-        // runway/mock use the product-standard 6s (with dev override allowed).
+        // runway/seedance2/mock use the product-standard 6s (with dev override
+        // allowed). Seedance 2.0 accepts 4-15s; 6s sits inside that range.
         let video_model = match video_provider.as_str() {
             "veo3" => "veo3".to_string(),
+            "seedance2" => "seedance2".to_string(),
             "runway" => "gen4.5".to_string(),
             _ => "gen4.5".to_string(),
         };
@@ -152,7 +154,7 @@ impl Config {
         }
 
         match cfg.video_provider.as_str() {
-            "runway" | "veo3" => {
+            "runway" | "veo3" | "seedance2" => {
                 if cfg.runway_api_key.is_empty() {
                     panic!(
                         "config: RUNWAY_API_KEY is required when VIDEO_PROVIDER={}",
@@ -162,7 +164,7 @@ impl Config {
             }
             "mock" => {}
             other => panic!(
-                "config: unknown VIDEO_PROVIDER {:?} (expected runway, veo3, or mock)",
+                "config: unknown VIDEO_PROVIDER {:?} (expected runway, veo3, seedance2, or mock)",
                 other
             ),
         }
