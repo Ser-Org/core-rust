@@ -1,5 +1,7 @@
 # ---- Build stage ----
-FROM rust:1.83-bookworm AS builder
+# 1.85+ required: some transitive deps (notably moxcms via the `image` crate)
+# declare `edition2024`, which was only stabilized in Rust 1.85.
+FROM rust:1.85-bookworm AS builder
 
 WORKDIR /app
 
