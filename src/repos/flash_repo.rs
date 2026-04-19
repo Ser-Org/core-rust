@@ -1,8 +1,15 @@
 use crate::models::*;
 use anyhow::Result;
 use rand::RngCore;
-use sqlx::PgPool;
+use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
+
+#[derive(FromRow)]
+struct FlashVisionListRow {
+    #[sqlx(flatten)]
+    vision: FlashVision,
+    cover_image_url: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct FlashRepository {
@@ -88,25 +95,39 @@ impl FlashRepository {
         user_id: Uuid,
         limit: i64,
         offset: i64,
-    ) -> Result<(Vec<FlashVision>, i64)> {
+    ) -> Result<(Vec<(FlashVision, Option<String>)>, i64)> {
         let total_row: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM flash_visions WHERE user_id = $1")
                 .bind(user_id)
                 .fetch_one(&self.pool)
                 .await?;
-        let rows = sqlx::query_as::<_, FlashVision>(
-            "SELECT id, user_id, question, input_method, status, photo_url, music_url,
-                    error_message, share_token, is_public, completed_at, created_at, updated_at
-             FROM flash_visions WHERE user_id = $1
-             ORDER BY created_at DESC
-             LIMIT $2 OFFSET $3",
+        let rows = sqlx::query_as::<_, FlashVisionListRow>(
+            r#"SELECT v.id, v.user_id, v.question, v.input_method, v.status, v.photo_url,
+                      v.music_url, v.error_message, v.share_token, v.is_public,
+                      v.completed_at, v.created_at, v.updated_at,
+                      i.storage_url AS cover_image_url
+               FROM flash_visions v
+               LEFT JOIN LATERAL (
+                 SELECT storage_url
+                 FROM flash_images
+                 WHERE flash_vision_id = v.id
+                 ORDER BY "index" ASC
+                 LIMIT 1
+               ) i ON true
+               WHERE v.user_id = $1
+               ORDER BY v.created_at DESC
+               LIMIT $2 OFFSET $3"#,
         )
         .bind(user_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
         .await?;
-        Ok((rows, total_row.0))
+        let items = rows
+            .into_iter()
+            .map(|r| (r.vision, r.cover_image_url))
+            .collect();
+        Ok((items, total_row.0))
     }
 
     pub async fn create_flash_image(&self, img: &FlashImage) -> Result<()> {

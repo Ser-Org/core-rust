@@ -103,10 +103,22 @@ pub async fn list_flash(
     let limit = q.limit.unwrap_or(20).clamp(1, 100);
     let offset = q.offset.unwrap_or(0).max(0);
     match state.flash_repo.list_flash_visions_by_user(user_id, limit, offset).await {
-        Ok((items, total)) => write_json(
-            StatusCode::OK,
-            json!({ "flashes": items, "total": total, "limit": limit, "offset": offset }),
-        ),
+        Ok((items, total)) => {
+            let flashes: Vec<serde_json::Value> = items
+                .into_iter()
+                .map(|(vision, cover)| {
+                    let mut obj = serde_json::to_value(vision).unwrap_or(json!({}));
+                    if let Some(url) = cover {
+                        obj["cover_image_url"] = serde_json::Value::String(url);
+                    }
+                    obj
+                })
+                .collect();
+            write_json(
+                StatusCode::OK,
+                json!({ "flashes": flashes, "total": total, "limit": limit, "offset": offset }),
+            )
+        }
         Err(e) => {
             tracing::error!(error = ?e, "list_flash: failed to list flashes");
             write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to list flashes")

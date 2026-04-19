@@ -111,6 +111,21 @@ fn user_context_summary(ctx: &SimulationContext) -> String {
     if !life.location.is_empty() {
         out.push_str(&format!("Location: {}\n", life.location));
     }
+    if !life.gender.is_empty() {
+        let g = life.gender.to_ascii_lowercase();
+        let pronoun_hint = match g.as_str() {
+            "male" | "m" | "man" => " (use he/him pronouns and masculine references like \"the man\")",
+            "female" | "f" | "woman" => " (use she/her pronouns and feminine references like \"the woman\")",
+            "non_binary" | "nonbinary" | "non-binary" | "nb" | "enby" => {
+                " (use they/them pronouns and gender-neutral references like \"the person\")"
+            }
+            "prefer_not_to_say" | "unspecified" | "unknown" => {
+                " (use they/them pronouns and gender-neutral references like \"the person\")"
+            }
+            _ => "",
+        };
+        out.push_str(&format!("Gender: {}{}\n", life.gender, pronoun_hint));
+    }
     if !life.profession.is_empty() {
         out.push_str(&format!("Profession: {}\n", life.profession));
     } else if !life.role.is_empty() {
@@ -188,6 +203,7 @@ Hard constraints on every scene_prompt and motion_prompt:
 - Do NOT describe phone screens, laptop screens, monitors, TVs, or any device UI. Diffusion models render these poorly.
 - Do NOT describe visible text, signage, captions, logos, or labels. Same reason.
 - If a beat conceptually involves a device (e.g. reading a message, checking a notification, doing work on a laptop), frame it indirectly — describe the subject's posture, gaze, expression, or reaction. Never the screen content.
+- Pronouns and gendered references must match the user's gender from the context. If Gender is male, use he/him and words like "the man"; if female, use she/her and "the woman"; if non-binary or unspecified, use they/them and "the person". Never mix pronouns for the same subject across a scene or across paths.
 
 Output JSON:
 {{
@@ -308,6 +324,7 @@ Hard constraints on scene_prompt and motion_prompt:
 - Do NOT describe phone screens, laptop screens, monitors, TVs, or any device UI. Diffusion models render these poorly.
 - Do NOT describe visible text, signage, captions, logos, or labels. Same reason.
 - If a beat conceptually involves a device (e.g. reading a message, checking a notification, doing work on a laptop), frame it indirectly — describe the subject's posture, gaze, expression, or reaction. Never the screen content.
+- Pronouns and gendered references must match the user's gender from the context. If Gender is male, use he/him and words like "the man"; if female, use she/her and "the woman"; if non-binary or unspecified, use they/them and "the person". Never mix pronouns for the same subject.
 
 Output JSON: {"scene_prompt": "...", "motion_prompt": "...", "edit_prompt": "..."}"#;
     let uc = user_context_summary(ctx);

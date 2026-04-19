@@ -48,8 +48,13 @@ SUPABASE_JWT_SECRET=
 # Text generation provider. Options: mock, ollama, claude.
 TEXT_PROVIDER=mock
 
-# Video generation provider. Options: mock, runway.
-# Runway also serves as the image provider when enabled.
+# Video generation provider. Options: mock, runway, veo3.
+# - runway: Runway gen4.5 image-to-video, 6-second clips.
+# - veo3:   Runway-hosted Google Veo 3 image-to-video. Forces 8-second
+#           clips (veo3 requires exactly 8s). Higher identity fidelity
+#           but more expensive and longer output.
+# Runway also serves as the image provider when runway/veo3 is selected.
+# Both runway and veo3 require RUNWAY_API_KEY.
 VIDEO_PROVIDER=mock
 
 # Flash image provider (the "what if" pipeline). Options: flux, gen4_image, mock.

@@ -293,9 +293,54 @@ impl ObjectStore {
             Ok(m) if !m.is_empty() => m,
             _ => guess_mime_type_from_path(path),
         };
+        // PNGs from Flux run ~4 MB; base64 inflates to ~5.5 MB and stacking
+        // two in one Runway request trips its ~10 MB body limit (HTTP 413).
+        // Re-encode lossless → JPEG q=90 (visually indistinguishable on
+        // photographic scene bases) before inlining. Storage keeps the PNG.
+        let (data, mime) = if mime == "image/png" {
+            let original_len = data.len();
+            let png = data;
+            match tokio::task::spawn_blocking(move || reencode_png_to_jpeg(&png, 90)).await {
+                Ok(Ok(jpeg)) => {
+                    tracing::debug!(
+                        bucket,
+                        path,
+                        original_bytes = original_len,
+                        jpeg_bytes = jpeg.len(),
+                        "to_data_uri: png→jpeg re-encoded for external inlining",
+                    );
+                    (jpeg, "image/jpeg".to_string())
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, bucket, path, "to_data_uri: png→jpeg failed, sending original");
+                    (self.download(bucket, path).await?, mime)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, bucket, path, "to_data_uri: png→jpeg task panicked, sending original");
+                    (self.download(bucket, path).await?, mime)
+                }
+            }
+        } else {
+            (data, mime)
+        };
         let encoded = B64.encode(&data);
         Ok(format!("data:{};base64,{}", mime, encoded))
     }
+}
+
+/// Decode a PNG and re-encode it as a JPEG at the given quality.
+/// Drops alpha via RGB flattening (scene bases are opaque).
+fn reencode_png_to_jpeg(png_bytes: &[u8], quality: u8) -> Result<Vec<u8>> {
+    use image::codecs::jpeg::JpegEncoder;
+    use image::{ExtendedColorType, ImageFormat};
+    let img = image::load_from_memory_with_format(png_bytes, ImageFormat::Png)
+        .context("decode png")?;
+    let rgb = img.into_rgb8();
+    let mut out = Vec::with_capacity(png_bytes.len() / 4);
+    let mut enc = JpegEncoder::new_with_quality(&mut out, quality);
+    enc.encode(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
+        .context("encode jpeg")?;
+    Ok(out)
 }
 
 pub async fn create_supabase_signed_url(

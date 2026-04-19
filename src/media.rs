@@ -1,11 +1,12 @@
-//! Media pipeline — 3-stage Precision Sequence
+//! Media pipeline — 2-stage Precision Sequence
 //!
 //! Stage 1: Flux 2 Max — character-in-scene composition (input: character plate)
-//! Stage 2: Runway gen4.5 — image-to-video animation
-//! Stage 3: Runway gen4_aleph — video-to-video refinement/relighting
+//! Stage 2: Runway gen4.5 — image-to-video animation (final output)
 //!
 //! Stage 1 was previously Runway gen4_image; Flux holds identity better when
 //! given a single input image, and Runway takes over from the animation step.
+//! A former Stage 3 (gen4_aleph video-to-video) was removed: aleph's creative
+//! re-synthesis distorted character identity. gen4.5 is now the terminal stage.
 
 use crate::objectstore::ObjectStore;
 use crate::providers::{
@@ -29,9 +30,16 @@ const STAGE1_FLUX_HEIGHT: u32 = 1152;
 /// person in the scene", not "reproduce the reference"); the suffix
 /// carries cinematic camera/lens/grade language so Runway's motion stage
 /// inherits the composition instead of being asked to reinvent it.
-const PIPELINE_SCENE_PREFIX: &str = "Place the subject from the reference image into the scene described. Preserve their exact facial features, hair, skin tone, and build — this is the same person. Scene: ";
+const PIPELINE_SCENE_PREFIX: &str = "Place the subject from the reference image into the scene described. Preserve their exact facial features, hair, skin tone, and build — this is the same person. The subject faces the camera directly (forward-facing, head and shoulders squared to the lens); do not render profile or back views. Scene: ";
 const PIPELINE_SCENE_SUFFIX: &str = " Cinematic photograph, shot on Sony A7 IV with a 35mm f/1.4 lens, available light, 4K ultra-detailed. Natural skin with visible pore texture and subtle asymmetry — reject smooth \"AI face\" look. Anatomically correct hands with five visible fingers. Documentary prestige-film aesthetic, Kodak Portra 800 palette. Pure photograph; no illustration or stylization.";
-const PIPELINE_SCENE_CONSTRAINTS: &str = "\n\nConstraints: no visible text, typography, captions, signage, logos, or device screens/UI. Horizontal 16:9 framing.";
+const PIPELINE_SCENE_CONSTRAINTS: &str = "\n\nConstraints: no visible text, typography, captions, signage, logos, or device screens/UI. Horizontal 16:9 framing. Only the subject appears; no other people in the frame.";
+
+/// Suffix appended to the motion prompt handed to Runway gen4.5. Tells the
+/// model not to invent additional people during the animation — the scene
+/// base already establishes who is in the frame. Runway's `promptText`
+/// accepts ~1000 UTF-16 code units; keep the total under MOTION_PROMPT_MAX_BYTES.
+const PIPELINE_MOTION_SUFFIX: &str = " No other people appear in the frame; do not introduce additional subjects or extras at any point in the clip.";
+const PIPELINE_MOTION_PROMPT_MAX_BYTES: usize = 950;
 /// Leaves headroom for BFL Flux prompt limits. Flux is more generous than
 /// Runway's 1000-UTF-16 cap, but staying under 2KB avoids surprises.
 const PIPELINE_PROMPT_MAX_BYTES: usize = 2000;
@@ -57,7 +65,10 @@ pub struct MediaPipeline {
     pub flash_image_provider: FlashImageProviderRef,
     pub video_provider: VideoProviderRef,
     pub media_bucket: String,
-    pub skip_aleph_stage: bool,
+    /// Model id passed to the video provider at stage 2. Populated from
+    /// `config::Config::video_model` (derived from `VIDEO_PROVIDER`). Falls
+    /// back to `"gen4.5"` when empty.
+    pub video_model: String,
 }
 
 impl MediaPipeline {
@@ -67,7 +78,7 @@ impl MediaPipeline {
         flash_image_provider: FlashImageProviderRef,
         video_provider: VideoProviderRef,
         media_bucket: String,
-        skip_aleph_stage: bool,
+        video_model: String,
     ) -> Self {
         Self {
             object_store,
@@ -75,7 +86,7 @@ impl MediaPipeline {
             flash_image_provider,
             video_provider,
             media_bucket,
-            skip_aleph_stage,
+            video_model,
         }
     }
 
@@ -90,23 +101,14 @@ impl MediaPipeline {
             clip_tag = %input.clip_tag,
             scene_prompt_len = input.scene_prompt.len(),
             motion_prompt_len = input.motion_prompt.len(),
-            edit_prompt_len = input.edit_prompt.len(),
             has_profile_photo = !input.profile_photo_url.is_empty(),
             has_character_plate = !input.character_plate_url.is_empty(),
             duration_secs = input.duration_secs,
-            skip_aleph_stage = self.skip_aleph_stage,
             seed,
             "media_pipeline: execute start"
         );
         let scene = self.execute_stage1(&input, seed).await.context("stage 1 (base)")?;
         let motion = self.execute_stage2(&input, &scene, seed).await.context("stage 2 (motion)")?;
-
-        let final_video = if self.skip_aleph_stage {
-            tracing::info!(simulation_id = %input.simulation_id, clip_tag = %input.clip_tag, "media_pipeline: skipping stage 3 (dev override)");
-            motion.clone()
-        } else {
-            self.execute_stage3(&input, &motion, seed).await.context("stage 3 (edit)")?
-        };
 
         tracing::info!(
             simulation_id = %input.simulation_id,
@@ -116,8 +118,8 @@ impl MediaPipeline {
         );
         Ok(PipelineOutput {
             scene_image: scene,
-            motion_video: motion,
-            final_video,
+            motion_video: motion.clone(),
+            final_video: motion,
         })
     }
 
@@ -237,25 +239,40 @@ impl MediaPipeline {
     ) -> Result<PipelineArtifact> {
         let started = std::time::Instant::now();
         let dur = if input.duration_secs < 2 { 10 } else { input.duration_secs };
-        if input.character_plate_url.is_empty() {
-            return Err(anyhow!("missing character plate reference for gen4.5"));
-        }
+
+        // Note: we intentionally do NOT pass `character_plate_url` as a
+        // referenceImage here. Stage 1 (Flux) has already composed the
+        // character into the scene; sending the plate as a second identity
+        // signal caused subtle face drift as Runway blended two slightly
+        // different faces. gen4.5 anchors on the scene base alone.
+
+        // Wrap the motion prompt with a no-other-subjects constraint, staying
+        // under Runway's ~1000 UTF-16 cap on promptText.
+        let motion_budget = PIPELINE_MOTION_PROMPT_MAX_BYTES.saturating_sub(PIPELINE_MOTION_SUFFIX.len());
+        let motion_trimmed = truncate_to_byte_boundary(&input.motion_prompt, motion_budget);
+        let final_motion_prompt = format!("{}{}", motion_trimmed, PIPELINE_MOTION_SUFFIX);
+
         tracing::info!(
             simulation_id = %input.simulation_id,
             clip_tag = %input.clip_tag,
             duration_secs = dur,
             input_scene_bytes = scene.data.len(),
             seed,
-            motion_prompt_preview = %truncate_for_log(&input.motion_prompt, 200),
+            motion_prompt_preview = %truncate_for_log(&final_motion_prompt, 200),
             "media_pipeline: stage 2 (gen4.5) starting"
         );
+        let model = if self.video_model.is_empty() {
+            "gen4.5".to_string()
+        } else {
+            self.video_model.clone()
+        };
         let resp = self
             .video_provider
             .generate_video(&VideoRequest {
-                prompt: input.motion_prompt.clone(),
-                model: "gen4.5".into(),
+                prompt: final_motion_prompt,
+                model,
                 input_image_url: scene.storage_url.clone(),
-                reference_images: vec![input.character_plate_url.clone()],
+                reference_images: vec![],
                 aspect_ratio: DEFAULT_PIPELINE_VIDEO_ASPECT_RATIO.into(),
                 duration_secs: dur,
                 input_video_url: String::new(),
@@ -306,70 +323,6 @@ impl MediaPipeline {
             mime_type: resp.mime_type,
             storage_path,
             storage_url: signed_url,
-        })
-    }
-
-    async fn execute_stage3(
-        &self,
-        input: &PipelineInput,
-        motion: &PipelineArtifact,
-        seed: i64,
-    ) -> Result<PipelineArtifact> {
-        let started = std::time::Instant::now();
-        tracing::info!(
-            simulation_id = %input.simulation_id,
-            clip_tag = %input.clip_tag,
-            input_motion_bytes = motion.data.len(),
-            seed,
-            edit_prompt_preview = %truncate_for_log(&input.edit_prompt, 200),
-            "media_pipeline: stage 3 (gen4_aleph) starting"
-        );
-        let resp = self
-            .video_provider
-            .generate_video(&VideoRequest {
-                prompt: input.edit_prompt.clone(),
-                model: "gen4_aleph".into(),
-                input_video_url: motion.storage_url.clone(),
-                aspect_ratio: DEFAULT_PIPELINE_VIDEO_ASPECT_RATIO.into(),
-                duration_secs: 0,
-                input_image_url: String::new(),
-                reference_images: vec![],
-                seed: Some(seed),
-            })
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    simulation_id = %input.simulation_id,
-                    clip_tag = %input.clip_tag,
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    error = ?e,
-                    "media_pipeline: stage 3 provider call failed"
-                );
-                e
-            })?;
-        if resp.video_data.is_empty() {
-            return Err(anyhow!("empty video data returned"));
-        }
-        if !is_valid_mp4_header(&resp.video_data) {
-            return Err(anyhow!("invalid MP4 header in final video"));
-        }
-        let storage_path = self.stage_path(input, "final.mp4");
-        self.object_store
-            .upload(&self.media_bucket, &storage_path, resp.video_data.clone(), &resp.mime_type)
-            .await?;
-        tracing::info!(
-            simulation_id = %input.simulation_id,
-            clip_tag = %input.clip_tag,
-            storage_path = %storage_path,
-            bytes = resp.video_data.len(),
-            total_elapsed_ms = started.elapsed().as_millis() as u64,
-            "media_pipeline: stage 3 complete"
-        );
-        Ok(PipelineArtifact {
-            data: resp.video_data,
-            mime_type: resp.mime_type,
-            storage_path,
-            storage_url: String::new(),
         })
     }
 

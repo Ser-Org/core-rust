@@ -13,6 +13,10 @@ pub struct Config {
 
     pub text_provider: String,
     pub video_provider: String,
+    /// The model identifier the media pipeline passes to the video provider
+    /// at stage 2 (e.g. `"gen4.5"`, `"veo3"`). Derived from `video_provider`
+    /// at load time — not a separate env var.
+    pub video_model: String,
     pub flash_provider: String,
 
     pub claude_api_key: String,
@@ -66,7 +70,17 @@ impl Config {
         } else {
             0
         };
-        let simulation_video_clip_duration_secs = if dev_overrides_enabled {
+        let video_provider = env_or_default("VIDEO_PROVIDER", "mock");
+        // Veo3 (Runway-hosted Google Veo 3) forces an 8-second clip duration;
+        // runway/mock use the product-standard 6s (with dev override allowed).
+        let video_model = match video_provider.as_str() {
+            "veo3" => "veo3".to_string(),
+            "runway" => "gen4.5".to_string(),
+            _ => "gen4.5".to_string(),
+        };
+        let simulation_video_clip_duration_secs = if video_provider == "veo3" {
+            8
+        } else if dev_overrides_enabled {
             env_positive_int("SIMULATION_VIDEO_CLIP_DURATION_SECS", 6)
         } else {
             6
@@ -83,7 +97,8 @@ impl Config {
             supabase_jwt_secret: require_env("SUPABASE_JWT_SECRET"),
 
             text_provider: env_or_default("TEXT_PROVIDER", "ollama"),
-            video_provider: env_or_default("VIDEO_PROVIDER", "mock"),
+            video_provider,
+            video_model,
             flash_provider: env_or_default("FLASH_PROVIDER", "flux"),
 
             claude_api_key: env::var("CLAUDE_API_KEY").unwrap_or_default(),
@@ -137,14 +152,17 @@ impl Config {
         }
 
         match cfg.video_provider.as_str() {
-            "runway" => {
+            "runway" | "veo3" => {
                 if cfg.runway_api_key.is_empty() {
-                    panic!("config: RUNWAY_API_KEY is required when VIDEO_PROVIDER=runway");
+                    panic!(
+                        "config: RUNWAY_API_KEY is required when VIDEO_PROVIDER={}",
+                        cfg.video_provider
+                    );
                 }
             }
             "mock" => {}
             other => panic!(
-                "config: unknown VIDEO_PROVIDER {:?} (expected runway or mock)",
+                "config: unknown VIDEO_PROVIDER {:?} (expected runway, veo3, or mock)",
                 other
             ),
         }

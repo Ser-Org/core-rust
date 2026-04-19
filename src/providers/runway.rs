@@ -14,6 +14,9 @@ const MAX_CONSEC_ERRORS: u32 = 5;
 
 const MODEL_GEN45: &str = "gen4.5";
 const MODEL_GEN4_ALEPH: &str = "gen4_aleph";
+const MODEL_VEO3: &str = "veo3";
+const MODEL_VEO3_1: &str = "veo3.1";
+const MODEL_VEO3_1_FAST: &str = "veo3.1_fast";
 const DEFAULT_I2V_RATIO: &str = "1280:720";
 const DEFAULT_VIDEO_DURATION: u32 = 5;
 const DEFAULT_TEXT_DURATION: u32 = 4;
@@ -26,6 +29,15 @@ const VIDEO_TO_VIDEO_RATIOS: &[&str] = &[
 ];
 const TEXT_TO_VIDEO_RATIOS: &[&str] = &["1280:720", "720:1280", "1080:1920", "1920:1080"];
 const TEXT_TO_VIDEO_DURATIONS: &[u32] = &[4, 6, 8];
+
+// Runway-hosted Google Veo 3 family has stricter requirements than gen4.x:
+// narrower ratio enum, fixed 8s duration, no seed/moderation/referenceImages.
+const VEO3_I2V_RATIOS: &[&str] = &["1280:720", "720:1280", "1080:1920", "1920:1080"];
+const VEO3_FIXED_DURATION: u32 = 8;
+
+fn is_veo3_family(model: &str) -> bool {
+    matches!(model, MODEL_VEO3 | MODEL_VEO3_1 | MODEL_VEO3_1_FAST)
+}
 
 pub struct RunwayProvider {
     api_key: String,
@@ -477,6 +489,20 @@ fn validate_i2v(ratio: &str, duration: u32) -> Result<()> {
     Ok(())
 }
 
+fn validate_veo3_i2v(ratio: &str, duration: u32) -> Result<()> {
+    validate_allowed("image_to_video[veo3]", "ratio", ratio, VEO3_I2V_RATIOS)?;
+    if duration != VEO3_FIXED_DURATION {
+        return Err(anyhow::Error::from(HttpError {
+            status_code: 400,
+            message: format!(
+                "image_to_video[veo3]: invalid duration {} (must be exactly {})",
+                duration, VEO3_FIXED_DURATION
+            ),
+        }));
+    }
+    Ok(())
+}
+
 fn validate_t2v(ratio: &str, duration: u32) -> Result<()> {
     validate_allowed("text_to_video", "ratio", ratio, TEXT_TO_VIDEO_RATIOS)?;
     if !TEXT_TO_VIDEO_DURATIONS.contains(&duration) {
@@ -642,22 +668,54 @@ impl VideoProvider for RunwayProvider {
         } else if !req.input_image_url.is_empty() {
             let model = if req.model.is_empty() { MODEL_GEN45 } else { &req.model };
             let ratio = if req.aspect_ratio.is_empty() { DEFAULT_I2V_RATIO.to_string() } else { req.aspect_ratio.clone() };
-            let duration = if req.duration_secs < 2 { DEFAULT_VIDEO_DURATION } else { req.duration_secs };
-            validate_i2v(&ratio, duration)?;
-            let refs: Vec<ImageReferenceSimple> = req
-                .reference_images
-                .iter()
-                .map(|u| ImageReferenceSimple { uri: u.clone() })
-                .collect();
-            let body = ImageToVideoRequest {
-                model: model.to_string(),
-                prompt_image: req.input_image_url.clone(),
-                prompt_text: req.prompt.clone(),
-                reference_images: refs,
-                ratio,
-                duration,
-                content_moderation: moderation,
-                seed: req.seed,
+
+            let body = if is_veo3_family(model) {
+                // veo3 family: fixed 8s duration, no seed/moderation/refs.
+                // Caller's duration is coerced (veo3 rejects any other value).
+                if req.duration_secs != VEO3_FIXED_DURATION {
+                    tracing::debug!(
+                        model,
+                        requested = req.duration_secs,
+                        forced = VEO3_FIXED_DURATION,
+                        "runway: coercing duration to veo3's fixed value"
+                    );
+                }
+                if !req.reference_images.is_empty() {
+                    tracing::warn!(
+                        model,
+                        count = req.reference_images.len(),
+                        "runway: veo3 does not accept referenceImages — dropping"
+                    );
+                }
+                validate_veo3_i2v(&ratio, VEO3_FIXED_DURATION)?;
+                ImageToVideoRequest {
+                    model: model.to_string(),
+                    prompt_image: req.input_image_url.clone(),
+                    prompt_text: req.prompt.clone(),
+                    reference_images: vec![],
+                    ratio,
+                    duration: VEO3_FIXED_DURATION,
+                    content_moderation: ContentModeration::default(),
+                    seed: None,
+                }
+            } else {
+                let duration = if req.duration_secs < 2 { DEFAULT_VIDEO_DURATION } else { req.duration_secs };
+                validate_i2v(&ratio, duration)?;
+                let refs: Vec<ImageReferenceSimple> = req
+                    .reference_images
+                    .iter()
+                    .map(|u| ImageReferenceSimple { uri: u.clone() })
+                    .collect();
+                ImageToVideoRequest {
+                    model: model.to_string(),
+                    prompt_image: req.input_image_url.clone(),
+                    prompt_text: req.prompt.clone(),
+                    reference_images: refs,
+                    ratio,
+                    duration,
+                    content_moderation: moderation,
+                    seed: req.seed,
+                }
             };
             self.post_task("/image_to_video", &body).await?
         } else {

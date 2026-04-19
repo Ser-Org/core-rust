@@ -96,11 +96,11 @@ async fn main() -> anyhow::Result<()> {
         _ => Arc::new(MockTextProvider::new()),
     };
     let video_provider: VideoProviderRef = match cfg.video_provider.as_str() {
-        "runway" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
         _ => Arc::new(MockVideoProvider::new("testdata/placeholder.mp4")),
     };
     let image_provider: ImageProviderRef = match cfg.video_provider.as_str() {
-        "runway" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
         _ => Arc::new(MockImageProvider::new()),
     };
     let flash_image_provider: FlashImageProviderRef = match cfg.flash_provider.as_str() {
@@ -134,14 +134,13 @@ async fn main() -> anyhow::Result<()> {
         cfg.stripe_extra_cinematic_price_id.clone(),
     ));
 
-    // Skip Stage 3 (gen4_aleph) in development to save credits.
     let media_pipeline = Arc::new(media::MediaPipeline::new(
         object_store.clone(),
         image_provider.clone(),
         flash_image_provider.clone(),
         video_provider.clone(),
         cfg.s3_bucket.clone(),
-        cfg.is_development(),
+        cfg.video_model.clone(),
     ));
 
     let state = AppState {
