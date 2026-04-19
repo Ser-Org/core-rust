@@ -1,0 +1,42 @@
+# Build output — rebuilt inside the container, ~1-2 GB otherwise.
+target/
+
+# VCS + CI config — not needed at build or runtime.
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Editor / OS junk
+.vscode/
+.idea/
+.claude/
+.DS_Store
+*.swp
+*.swo
+
+# Environment / secrets — NEVER ship these to the image.
+.env
+.env.*
+!env_example
+
+# Docs + templates — not needed at build or runtime.
+README.md
+CLAUDE.md
+*.md
+env_example
+
+# Supabase CLI local dev config — not needed; the migrations the server
+# actually runs live in ./migrations, which is COPY'd explicitly.
+supabase/
+
+# Tests — not needed for a release build.
+tests/
+
+# Docker metadata — ignored by Docker itself but harmless to list.
+Dockerfile
+.dockerignore
+
+# Logs and runtime scratch
+*.log
+coverage/

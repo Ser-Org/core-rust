@@ -487,10 +487,10 @@ pub mod plan_type {
 
     pub fn flash_limit(plan: &str) -> i32 {
         match plan {
-            FREE => 1,
-            EXPLORER | STARTER => 9,
+            FREE => 2,
+            EXPLORER | STARTER => 10,
             PRO => 30,
-            UNLIMITED | FAMILY => 90,
+            UNLIMITED | FAMILY => 75,
             _ => 0,
         }
     }

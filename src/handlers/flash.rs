@@ -32,8 +32,10 @@ pub async fn post_flash(
     }
     let method = if req.input_method.is_empty() { "text".into() } else { req.input_method };
 
-    // Consume flash entitlement in a transaction (only if billing enabled).
-    if state.billing.billing_enabled() {
+    // Consume flash entitlement in a transaction. Prod-only: dev/staging skip
+    // the check so testing never trips the what-if limit, even if Stripe is
+    // configured for those environments.
+    if state.billing.billing_enabled() && !state.cfg.is_development() {
         let mut tx = match state.pool.begin().await {
             Ok(t) => t,
             Err(e) => {
@@ -214,7 +216,8 @@ pub async fn check_flash_entitlement(
     State(state): State<AppState>,
     Extension(AuthUser(user_id)): Extension<AuthUser>,
 ) -> Response {
-    if !state.billing.billing_enabled() {
+    // Mirror the gate on post_flash: dev/staging always report entitled.
+    if !state.billing.billing_enabled() || state.cfg.is_development() {
         return write_json(StatusCode::OK, json!({"entitled": true}));
     }
     match state.subscription_repo.check_flash_entitlement(user_id).await {

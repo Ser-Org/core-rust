@@ -34,6 +34,8 @@ pub struct Config {
     pub stripe_pro_price_id: String,
     pub stripe_family_price_id: String,
     pub stripe_extra_cinematic_price_id: String,
+    pub stripe_extra_whatif_price_id: String,
+    pub stripe_whatif_10pack_price_id: String,
 
     pub resend_api_key: String,
     pub email_from_address: String,
@@ -115,6 +117,10 @@ impl Config {
             stripe_pro_price_id: env::var("STRIPE_PRO_PRICE_ID").unwrap_or_default(),
             stripe_family_price_id: env::var("STRIPE_FAMILY_PRICE_ID").unwrap_or_default(),
             stripe_extra_cinematic_price_id: env::var("STRIPE_EXTRA_CINEMATIC_PRICE_ID")
+                .unwrap_or_default(),
+            stripe_extra_whatif_price_id: env::var("STRIPE_EXTRA_WHATIF_PRICE_ID")
+                .unwrap_or_default(),
+            stripe_whatif_10pack_price_id: env::var("STRIPE_WHATIF_10PACK_PRICE_ID")
                 .unwrap_or_default(),
             resend_api_key: env::var("RESEND_API_KEY").unwrap_or_default(),
             email_from_address: env_or_default(

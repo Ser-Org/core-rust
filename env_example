@@ -142,6 +142,12 @@ STRIPE_FAMILY_PRICE_ID=
 # Stripe one-time price ID for extra cinematic sims ($10 each).
 STRIPE_EXTRA_CINEMATIC_PRICE_ID=
 
+# Stripe one-time price ID for a single extra what-if video ($1.50).
+STRIPE_EXTRA_WHATIF_PRICE_ID=
+
+# Stripe one-time price ID for a 10-pack of extra what-if videos ($12).
+STRIPE_WHATIF_10PACK_PRICE_ID=
+
 # Resend API key for working-session checkpoint reminder emails.
 RESEND_API_KEY=
 

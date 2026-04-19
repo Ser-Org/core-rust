@@ -1,3 +1,4 @@
+use axum::{routing::get, Router};
 use scout_core::{
     app_state::AppState,
     billing,
@@ -15,6 +16,7 @@ use scout_core::{
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,10 +48,23 @@ async fn main() -> anyhow::Result<()> {
         "scout-core (rust) starting"
     );
 
-    // Start HTTP server early with a health-only handler so Railway's health
-    // check passes while we initialize the rest of the app.
-    let listener = TcpListener::bind(&cfg.listen_addr()).await?;
-    tracing::info!(addr = %cfg.listen_addr(), "HTTP server listening (health-only)");
+    // Start a real HTTP server with only /api/v1/health wired up, running in
+    // a background task, so Railway's healthcheck passes while we do the
+    // heavy init below (db connect + migrations + bucket setup + JWKS fetch).
+    // We hand off to the full router once everything is ready.
+    let listen_addr = cfg.listen_addr();
+    let bootstrap_listener = TcpListener::bind(&listen_addr).await?;
+    tracing::info!(addr = %listen_addr, "bootstrap server listening (health-only)");
+
+    let (bootstrap_shutdown_tx, bootstrap_shutdown_rx) = oneshot::channel::<()>();
+    let bootstrap_app = Router::new().route("/api/v1/health", get(|| async { "ok" }));
+    let bootstrap_handle = tokio::spawn(async move {
+        axum::serve(bootstrap_listener, bootstrap_app)
+            .with_graceful_shutdown(async move {
+                let _ = bootstrap_shutdown_rx.await;
+            })
+            .await
+    });
 
     let pool = db::connect(&cfg.database_url).await?;
     tracing::info!("database connected");
@@ -174,8 +189,19 @@ async fn main() -> anyhow::Result<()> {
     let auth_cfg = AuthConfig::new(cfg.supabase_jwt_secret.clone(), jwks_url).await;
 
     let app = router::build_router(state, auth_cfg);
-    tracing::info!("router ready, serving requests");
+    tracing::info!("router ready, handing off from bootstrap server");
 
+    // Shut down the bootstrap server and wait for its listener to drop, then
+    // rebind on the same port and serve the full router.
+    let _ = bootstrap_shutdown_tx.send(());
+    match bootstrap_handle.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!(error = ?e, "bootstrap server exited with error"),
+        Err(e) => tracing::warn!(error = ?e, "bootstrap server task panicked"),
+    }
+
+    let listener = TcpListener::bind(&listen_addr).await?;
+    tracing::info!(addr = %listen_addr, "full server listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
