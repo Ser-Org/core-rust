@@ -122,6 +122,7 @@ impl MediaRepository {
         &self,
         sim_id: Uuid,
     ) -> Result<Vec<GeneratedMedia>> {
-        self.get_media_by_simulation_and_type(sim_id, media_type::VIDEO).await
+        self.get_media_by_simulation_and_type(sim_id, media_type::VIDEO)
+            .await
     }
 }

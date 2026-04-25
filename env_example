@@ -153,3 +153,5 @@ RESEND_API_KEY=
 
 # Sender identity for checkpoint reminder emails.
 EMAIL_FROM_ADDRESS=Scout <no-reply@scout.local>
+
+ENABLE_DYNAMIC_CHARACTER_PLATE=

@@ -19,7 +19,8 @@ impl SimulationComponentsRepo {
         components: &[SimulationComponent],
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.upsert_simulation_components_tx(&mut tx, components).await?;
+        self.upsert_simulation_components_tx(&mut tx, components)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -69,7 +70,8 @@ impl SimulationComponentsRepo {
         sim_id: Uuid,
         component_key: &str,
     ) -> Result<String> {
-        self.set_component_status(sim_id, component_key, "running", None, None).await
+        self.set_component_status(sim_id, component_key, "running", None, None)
+            .await
     }
 
     pub async fn mark_component_completed(
@@ -77,7 +79,8 @@ impl SimulationComponentsRepo {
         sim_id: Uuid,
         component_key: &str,
     ) -> Result<String> {
-        self.set_component_status(sim_id, component_key, "completed", None, None).await
+        self.set_component_status(sim_id, component_key, "completed", None, None)
+            .await
     }
 
     pub async fn mark_component_failed(
@@ -87,9 +90,18 @@ impl SimulationComponentsRepo {
         error_code: &str,
         error_message: &str,
     ) -> Result<String> {
-        let ec = if error_code.is_empty() { None } else { Some(error_code) };
-        let em = if error_message.is_empty() { None } else { Some(error_message) };
-        self.set_component_status(sim_id, component_key, "failed", ec, em).await
+        let ec = if error_code.is_empty() {
+            None
+        } else {
+            Some(error_code)
+        };
+        let em = if error_message.is_empty() {
+            None
+        } else {
+            Some(error_message)
+        };
+        self.set_component_status(sim_id, component_key, "failed", ec, em)
+            .await
     }
 
     pub async fn mark_components_failed_by_type(
@@ -113,8 +125,16 @@ impl SimulationComponentsRepo {
         )
         .bind(sim_id)
         .bind(component_type)
-        .bind(if error_code.is_empty() { None } else { Some(error_code) })
-        .bind(if error_message.is_empty() { None } else { Some(error_message) })
+        .bind(if error_code.is_empty() {
+            None
+        } else {
+            Some(error_code)
+        })
+        .bind(if error_message.is_empty() {
+            None
+        } else {
+            Some(error_message)
+        })
         .execute(&mut *tx)
         .await?;
 
@@ -226,5 +246,9 @@ impl SimulationComponentsRepo {
 }
 
 pub fn nullable_string(s: &str) -> Option<&str> {
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }

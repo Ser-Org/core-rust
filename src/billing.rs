@@ -119,13 +119,12 @@ impl BillingService {
     }
 
     pub async fn get_subscription(&self, user_id: Uuid) -> Result<Subscription> {
-        self.subscription_repo.ensure_free_subscription(user_id).await
+        self.subscription_repo
+            .ensure_free_subscription(user_id)
+            .await
     }
 
-    pub async fn check_cinematic_entitlement(
-        &self,
-        user_id: Uuid,
-    ) -> Result<(), BillingError> {
+    pub async fn check_cinematic_entitlement(&self, user_id: Uuid) -> Result<(), BillingError> {
         if !self.billing_enabled() {
             return Ok(());
         }
@@ -162,7 +161,10 @@ impl BillingService {
                     ("client_reference_id", user_id.to_string()),
                     (
                         "success_url",
-                        format!("{}/billing/success?kind=subscription&plan={}", self.app_url, plan),
+                        format!(
+                            "{}/billing/success?kind=subscription&plan={}",
+                            self.app_url, plan
+                        ),
                     ),
                     (
                         "cancel_url",
@@ -221,12 +223,18 @@ impl BillingService {
                             self.app_url
                         ),
                     ),
-                    ("line_items[0][price]", self.extra_cinematic_price_id.clone()),
+                    (
+                        "line_items[0][price]",
+                        self.extra_cinematic_price_id.clone(),
+                    ),
                     ("line_items[0][quantity]", "1".into()),
                     ("metadata[user_id]", user_id.to_string()),
                     ("metadata[credits]", "1".into()),
                     ("metadata[purchase_kind]", "extra_cinematic".into()),
-                    ("payment_intent_data[metadata][user_id]", user_id.to_string()),
+                    (
+                        "payment_intent_data[metadata][user_id]",
+                        user_id.to_string(),
+                    ),
                     (
                         "payment_intent_data[metadata][purchase_kind]",
                         "extra_cinematic".into(),
@@ -270,7 +278,11 @@ impl BillingService {
         Ok(resp.url)
     }
 
-    pub async fn handle_webhook(&self, payload: &[u8], signature: &str) -> Result<(), BillingError> {
+    pub async fn handle_webhook(
+        &self,
+        payload: &[u8],
+        signature: &str,
+    ) -> Result<(), BillingError> {
         if !self.webhook_configured() {
             return Err(BillingError::NotConfigured);
         }
@@ -303,7 +315,9 @@ impl BillingService {
         .await
         .map_err(|e| BillingError::Other(anyhow!(e)))?;
         if exists.0 {
-            tx.commit().await.map_err(|e| BillingError::Other(anyhow!(e)))?;
+            tx.commit()
+                .await
+                .map_err(|e| BillingError::Other(anyhow!(e)))?;
             return Ok(());
         }
 
@@ -332,7 +346,10 @@ impl BillingService {
             }
             "invoice.payment_succeeded" => {
                 if let Some(sub_id) = extract_invoice_subscription_id(&obj) {
-                    let reason = obj.get("billing_reason").and_then(|v| v.as_str()).unwrap_or("");
+                    let reason = obj
+                        .get("billing_reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if matches!(
                         reason,
                         "subscription"
@@ -365,7 +382,9 @@ impl BillingService {
             .await
             .map_err(|e| BillingError::Other(anyhow!(e)))?;
 
-        tx.commit().await.map_err(|e| BillingError::Other(anyhow!(e)))?;
+        tx.commit()
+            .await
+            .map_err(|e| BillingError::Other(anyhow!(e)))?;
         Ok(())
     }
 
@@ -379,7 +398,11 @@ impl BillingService {
             None => return Ok(()),
         };
 
-        let customer_id = obj.get("customer").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let customer_id = obj
+            .get("customer")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if !customer_id.is_empty() {
             self.subscription_repo
                 .set_stripe_customer_id_tx(tx, user_id, &customer_id)
@@ -428,7 +451,11 @@ impl BillingService {
             None => return Ok(()),
         };
 
-        let customer_id = obj.get("customer").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let customer_id = obj
+            .get("customer")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let price_id = obj
             .get("items")
@@ -482,7 +509,11 @@ impl BillingService {
                 return Some(u);
             }
         }
-        if let Some(cust) = obj.get("customer").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(cust) = obj
+            .get("customer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             if let Ok(Some(s)) = self.subscription_repo.get_by_stripe_customer_id(cust).await {
                 return Some(s.user_id);
             }

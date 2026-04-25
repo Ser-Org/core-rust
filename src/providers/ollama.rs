@@ -19,7 +19,12 @@ impl OllamaProvider {
             .timeout(Duration::from_secs(60 * 30))
             .build()
             .expect("reqwest client");
-        Self { base_url, model_name, client, log_interactions }
+        Self {
+            base_url,
+            model_name,
+            client,
+            log_interactions,
+        }
     }
 }
 
@@ -47,8 +52,12 @@ struct ChatOptions {
     num_predict: u32,
 }
 
-fn is_zero_f32(v: &f32) -> bool { *v == 0.0 }
-fn is_zero_u32(v: &u32) -> bool { *v == 0 }
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
+}
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
 
 #[derive(Deserialize)]
 struct ChatResponse {
@@ -70,12 +79,25 @@ impl TextProvider for OllamaProvider {
         let body = ChatRequest {
             model: self.model_name.clone(),
             messages: vec![
-                ChatMessage { role: "system".into(), content: req.system_prompt.clone() },
-                ChatMessage { role: "user".into(), content: user_content },
+                ChatMessage {
+                    role: "system".into(),
+                    content: req.system_prompt.clone(),
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: user_content,
+                },
             ],
             stream: false,
-            options: ChatOptions { temperature: req.temperature, num_predict: req.max_tokens },
-            format: if req.json_mode { "json".into() } else { String::new() },
+            options: ChatOptions {
+                temperature: req.temperature,
+                num_predict: req.max_tokens,
+            },
+            format: if req.json_mode {
+                "json".into()
+            } else {
+                String::new()
+            },
         };
         let url = format!("{}/api/chat", self.base_url);
         if self.log_interactions {

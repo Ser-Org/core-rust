@@ -15,7 +15,9 @@ impl MockTextProvider {
 #[async_trait]
 impl TextProvider for MockTextProvider {
     async fn generate_text(&self, req: &TextRequest) -> Result<TextResponse> {
-        let content = if req.json_mode { mock_json_response() } else {
+        let content = if req.json_mode {
+            mock_json_response()
+        } else {
             "This is a mock text response from the Scout mock provider.".to_string()
         };
         Ok(TextResponse {
@@ -56,7 +58,9 @@ pub struct MockVideoProvider {
 
 impl MockVideoProvider {
     pub fn new<S: Into<String>>(path: S) -> Self {
-        Self { placeholder_path: path.into() }
+        Self {
+            placeholder_path: path.into(),
+        }
     }
 }
 
@@ -67,7 +71,11 @@ impl VideoProvider for MockVideoProvider {
         let data = tokio::fs::read(&self.placeholder_path)
             .await
             .unwrap_or_else(|_| placeholder_mp4().to_vec());
-        let dur = if req.duration_secs == 0 { 5 } else { req.duration_secs };
+        let dur = if req.duration_secs == 0 {
+            5
+        } else {
+            req.duration_secs
+        };
         Ok(VideoResponse {
             video_data: data,
             mime_type: "video/mp4".into(),

@@ -30,7 +30,11 @@ pub async fn post_flash(
     if req.question.is_empty() {
         return write_error(StatusCode::BAD_REQUEST, "question is required");
     }
-    let method = if req.input_method.is_empty() { "text".into() } else { req.input_method };
+    let method = if req.input_method.is_empty() {
+        "text".into()
+    } else {
+        req.input_method
+    };
 
     // Consume flash entitlement in a transaction. Prod-only: dev/staging skip
     // the check so testing never trips the what-if limit, even if Stripe is
@@ -77,13 +81,19 @@ pub async fn post_flash(
     };
     if let Err(e) = state.flash_repo.create_flash_vision(&vision).await {
         tracing::error!(error = ?e, "post_flash: failed to create flash vision");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create flash vision");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to create flash vision",
+        );
     }
     let _ = state
         .job_client
         .insert(
             jobs::KIND_FLASH_GENERATION,
-            &FlashGenerationArgs { flash_vision_id: vision.id, user_id },
+            &FlashGenerationArgs {
+                flash_vision_id: vision.id,
+                user_id,
+            },
         )
         .await;
     write_json(StatusCode::CREATED, json!({ "flash_id": vision.id }))
@@ -104,7 +114,11 @@ pub async fn list_flash(
 ) -> Response {
     let limit = q.limit.unwrap_or(20).clamp(1, 100);
     let offset = q.offset.unwrap_or(0).max(0);
-    match state.flash_repo.list_flash_visions_by_user(user_id, limit, offset).await {
+    match state
+        .flash_repo
+        .list_flash_visions_by_user(user_id, limit, offset)
+        .await
+    {
         Ok((items, total)) => {
             let flashes: Vec<serde_json::Value> = items
                 .into_iter()
@@ -182,7 +196,11 @@ pub async fn get_flash_status(
         Ok(v) => v,
         Err(_) => return write_error(StatusCode::NOT_FOUND, "flash not found"),
     };
-    let count = state.flash_repo.count_completed_images(flash_id).await.unwrap_or(0);
+    let count = state
+        .flash_repo
+        .count_completed_images(flash_id)
+        .await
+        .unwrap_or(0);
     write_json(
         StatusCode::OK,
         json!({
@@ -207,7 +225,10 @@ pub async fn post_flash_share(
         ),
         Err(e) => {
             tracing::error!(error = ?e, "post_flash_share: failed to create share link");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create share link")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create share link",
+            )
         }
     }
 }
@@ -220,7 +241,11 @@ pub async fn check_flash_entitlement(
     if !state.billing.billing_enabled() || state.cfg.is_development() {
         return write_json(StatusCode::OK, json!({"entitled": true}));
     }
-    match state.subscription_repo.check_flash_entitlement(user_id).await {
+    match state
+        .subscription_repo
+        .check_flash_entitlement(user_id)
+        .await
+    {
         Ok(()) => write_json(StatusCode::OK, json!({"entitled": true})),
         Err(e) => write_billing_error(&e.code, &e.message),
     }

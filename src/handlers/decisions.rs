@@ -31,8 +31,16 @@ pub async fn post_decision(
         tracing::debug!(user_id = %user_id, "decisions.create: missing decision_text");
         return write_error(StatusCode::BAD_REQUEST, "decision_text is required");
     }
-    let time_horizon = if req.time_horizon_months <= 0 { 12 } else { req.time_horizon_months };
-    let method = if req.input_method.is_empty() { "text".into() } else { req.input_method };
+    let time_horizon = if req.time_horizon_months <= 0 {
+        12
+    } else {
+        req.time_horizon_months
+    };
+    let method = if req.input_method.is_empty() {
+        "text".into()
+    } else {
+        req.input_method
+    };
     tracing::info!(
         user_id = %user_id,
         input_method = %method,
@@ -57,14 +65,14 @@ pub async fn post_decision(
     };
     if let Err(e) = state.decision_repo.create_decision(&decision).await {
         tracing::error!(user_id = %user_id, error = ?e, "decisions.create: failed to persist decision");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create decision");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to create decision",
+        );
     }
     tracing::info!(decision_id = %decision.id, "decisions.create: persisted");
 
-    write_json(
-        StatusCode::CREATED,
-        json!({ "decision_id": decision.id }),
-    )
+    write_json(StatusCode::CREATED, json!({ "decision_id": decision.id }))
 }
 
 #[derive(Deserialize)]
@@ -92,7 +100,10 @@ pub async fn post_answers(
             .await
         {
             tracing::error!(decision_id = %decision_id, error = ?e, "decisions.answers: failed to update time horizon");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update time horizon");
+            return write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to update time horizon",
+            );
         }
     }
 
@@ -136,7 +147,10 @@ pub async fn post_answers(
                 error = ?e,
                 "decisions.answers: failed to dispatch simulation"
             );
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to dispatch simulation")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to dispatch simulation",
+            )
         }
     }
 }
@@ -168,13 +182,22 @@ async fn dispatch_simulation(
 
     // Consume entitlement (only if billing enabled).
     if state.billing.billing_enabled() {
-        let mut tx = state.pool.begin().await.map_err(|e| DispatchError::Other(e.into()))?;
+        let mut tx = state
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DispatchError::Other(e.into()))?;
         let (_sub, _used_extra) = state
             .subscription_repo
             .consume_cinematic_entitlement_tx(&mut tx, user_id)
             .await
-            .map_err(|e| DispatchError::Entitlement { code: e.code, message: e.message })?;
-        tx.commit().await.map_err(|e| DispatchError::Other(e.into()))?;
+            .map_err(|e| DispatchError::Entitlement {
+                code: e.code,
+                message: e.message,
+            })?;
+        tx.commit()
+            .await
+            .map_err(|e| DispatchError::Other(e.into()))?;
     }
 
     // Build the full simulation context (frozen snapshot).
@@ -196,7 +219,8 @@ async fn dispatch_simulation(
         .get_decision_by_id(decision_id)
         .await
         .map_err(DispatchError::Other)?;
-    let fact_sheet = crate::financial::build_financial_fact_sheet(&profile, &life_state, &financial_profile);
+    let fact_sheet =
+        crate::financial::build_financial_fact_sheet(&profile, &life_state, &financial_profile);
     let relevance = crate::financial::decision_financial_relevance(&decision.category);
     let neutral = crate::financial::is_financially_neutral(relevance);
 
@@ -298,7 +322,9 @@ async fn dispatch_simulation(
         .job_client
         .insert(
             jobs::KIND_SCENARIO_PLANNER,
-            &ScenarioPlannerArgs { simulation_id: sim_id },
+            &ScenarioPlannerArgs {
+                simulation_id: sim_id,
+            },
         )
         .await
         .map_err(DispatchError::Other)?;
@@ -321,7 +347,10 @@ pub async fn list_decisions(
         }
         Err(e) => {
             tracing::error!(user_id = %user_id, error = ?e, "decisions.list: failed");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to list decisions")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to list decisions",
+            )
         }
     }
 }

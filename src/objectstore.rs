@@ -40,9 +40,7 @@ impl ObjectStore {
             .trim_end_matches("/storage/v1")
             .trim_end_matches('/')
             .to_string();
-        let http = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()?;
+        let http = Client::builder().timeout(Duration::from_secs(60)).build()?;
         Ok(Self {
             http,
             base_url: base,
@@ -99,7 +97,11 @@ impl ObjectStore {
         let create_url = format!("{}/storage/v1/bucket", self.base_url);
         let resp = self
             .auth_headers(self.http.post(&create_url))
-            .json(&Body { id: bucket, name: bucket, public: true })
+            .json(&Body {
+                id: bucket,
+                name: bucket,
+                public: true,
+            })
             .send()
             .await
             .with_context(|| format!("ensure_bucket: POST /bucket {}", bucket))?;
@@ -191,7 +193,12 @@ impl ObjectStore {
             .await
             .with_context(|| format!("objectstore: head {}/{}", bucket, path))?;
         if !resp.status().is_success() {
-            return Err(anyhow!("objectstore: head {}/{}: {}", bucket, path, resp.status()));
+            return Err(anyhow!(
+                "objectstore: head {}/{}: {}",
+                bucket,
+                path,
+                resp.status()
+            ));
         }
         Ok(resp
             .headers()
@@ -333,13 +340,18 @@ impl ObjectStore {
 fn reencode_png_to_jpeg(png_bytes: &[u8], quality: u8) -> Result<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     use image::{ExtendedColorType, ImageFormat};
-    let img = image::load_from_memory_with_format(png_bytes, ImageFormat::Png)
-        .context("decode png")?;
+    let img =
+        image::load_from_memory_with_format(png_bytes, ImageFormat::Png).context("decode png")?;
     let rgb = img.into_rgb8();
     let mut out = Vec::with_capacity(png_bytes.len() / 4);
     let mut enc = JpegEncoder::new_with_quality(&mut out, quality);
-    enc.encode(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
-        .context("encode jpeg")?;
+    enc.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        ExtendedColorType::Rgb8,
+    )
+    .context("encode jpeg")?;
     Ok(out)
 }
 
@@ -406,7 +418,9 @@ pub async fn create_supabase_signed_url(
 
 fn is_local_host(url: &str) -> bool {
     let lower = url.to_lowercase();
-    lower.contains("127.0.0.1") || lower.contains("localhost") || lower.contains("host.docker.internal")
+    lower.contains("127.0.0.1")
+        || lower.contains("localhost")
+        || lower.contains("host.docker.internal")
 }
 
 pub fn guess_mime_type_from_path(path: &str) -> String {

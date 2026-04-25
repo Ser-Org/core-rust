@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::handlers::{write_error, write_json};
-use crate::jobs::{self, CharacterPlateArgs, LifeStateExtractionArgs, KIND_CHARACTER_PLATE};
-use crate::jobs::worker::CHARACTER_PLATE_PROMPT;
+use crate::jobs::worker::ensure_character_palette_jobs;
+use crate::jobs::{self, LifeStateExtractionArgs};
 use crate::media;
 use crate::middleware::AuthUser;
 use crate::models::{self, LifeStory, UserPhoto};
@@ -30,16 +30,29 @@ pub async fn post_onboarding_path(
 ) -> Response {
     if req.path != "story" && req.path != "questions" {
         tracing::debug!(user_id = %user_id, value = %req.path, "onboarding.path: invalid value");
-        return write_error(StatusCode::BAD_REQUEST, "path must be one of: story, questions");
+        return write_error(
+            StatusCode::BAD_REQUEST,
+            "path must be one of: story, questions",
+        );
     }
     tracing::info!(user_id = %user_id, path = %req.path, "onboarding.path: setting");
     if let Err(e) = state.user_repo.ensure_profile(user_id).await {
         tracing::error!(user_id = %user_id, error = ?e, "onboarding.path: failed to ensure profile");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to ensure profile");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to ensure profile",
+        );
     }
-    if let Err(e) = state.user_repo.set_onboarding_path(user_id, &req.path).await {
+    if let Err(e) = state
+        .user_repo
+        .set_onboarding_path(user_id, &req.path)
+        .await
+    {
         tracing::error!(user_id = %user_id, error = ?e, "onboarding.path: failed to set onboarding path");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to set onboarding path");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to set onboarding path",
+        );
     }
     tracing::info!(user_id = %user_id, path = %req.path, "onboarding.path: set");
     write_json(StatusCode::OK, json!({"status": "ok"}))
@@ -61,7 +74,11 @@ pub async fn post_life_story(
         tracing::debug!(user_id = %user_id, "onboarding.life-story: missing raw_input");
         return write_error(StatusCode::BAD_REQUEST, "raw_input is required");
     }
-    let method = if req.input_method.is_empty() { "text".into() } else { req.input_method };
+    let method = if req.input_method.is_empty() {
+        "text".into()
+    } else {
+        req.input_method
+    };
     tracing::info!(
         user_id = %user_id,
         input_method = %method,
@@ -83,7 +100,10 @@ pub async fn post_life_story(
         Ok(id) => id,
         Err(e) => {
             tracing::error!(error = ?e, "post_life_story: failed to save life story");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save life story");
+            return write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to save life story",
+            );
         }
     };
 
@@ -102,7 +122,10 @@ pub async fn post_life_story(
         .job_client
         .insert(
             jobs::KIND_LIFE_STATE_EXTRACTION,
-            &LifeStateExtractionArgs { user_id, story_id: persisted_id },
+            &LifeStateExtractionArgs {
+                user_id,
+                story_id: persisted_id,
+            },
         )
         .await;
 
@@ -143,7 +166,11 @@ pub async fn post_identity(
         tracing::error!(error = ?e, "post_identity: failed to save identity");
         return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save identity");
     }
-    if let Err(e) = state.user_repo.upsert_identity(user_id, &req.age_bracket, &req.gender).await {
+    if let Err(e) = state
+        .user_repo
+        .upsert_identity(user_id, &req.age_bracket, &req.gender)
+        .await
+    {
         tracing::error!(user_id = %user_id, error = ?e, "onboarding.identity: failed to save identity");
         return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save identity");
     }
@@ -195,7 +222,10 @@ pub async fn post_photo(
     };
     if photo_type != models::photo_type::FACE && photo_type != models::photo_type::FULL_BODY {
         tracing::debug!(user_id = %user_id, value = %photo_type, "onboarding.photo: invalid photo_type");
-        return write_error(StatusCode::BAD_REQUEST, "invalid photo_type (must be 'face' or 'full_body')");
+        return write_error(
+            StatusCode::BAD_REQUEST,
+            "invalid photo_type (must be 'face' or 'full_body')",
+        );
     }
     tracing::debug!(
         user_id = %user_id,
@@ -240,10 +270,14 @@ pub async fn post_photo(
                         flux_url = Some(u);
                         flux_path = Some(fp);
                     }
-                    Err(e) => tracing::warn!(error = ?e, "onboarding.photo: flux derivative upload failed, continuing with original"),
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "onboarding.photo: flux derivative upload failed, continuing with original")
+                    }
                 }
             }
-            Err(e) => tracing::warn!(error = ?e, "onboarding.photo: flux derivative resize failed, continuing with original"),
+            Err(e) => {
+                tracing::warn!(error = ?e, "onboarding.photo: flux derivative resize failed, continuing with original")
+            }
         }
     }
 
@@ -261,7 +295,10 @@ pub async fn post_photo(
     };
     if let Err(e) = state.user_repo.insert_user_photo(&photo).await {
         tracing::error!(user_id = %user_id, error = ?e, "onboarding.photo: failed to save photo record");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save photo record");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to save photo record",
+        );
     }
     tracing::info!(
         user_id = %user_id,
@@ -269,11 +306,18 @@ pub async fn post_photo(
         photo_type = %photo_type,
         "onboarding.photo: uploaded successfully"
     );
-    write_json(StatusCode::OK, json!({"storage_url": url, "photo_type": photo_type}))
+    write_json(
+        StatusCode::OK,
+        json!({"storage_url": url, "photo_type": photo_type}),
+    )
 }
 
 fn normalized_image_extension(filename: &str, content_type: &str) -> String {
-    let ext = filename.rsplit('.').next().map(|s| format!(".{}", s.to_lowercase())).unwrap_or_default();
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .map(|s| format!(".{}", s.to_lowercase()))
+        .unwrap_or_default();
     match ext.as_str() {
         ".jpg" | ".jpeg" | ".png" | ".webp" => return ext,
         _ => {}
@@ -294,7 +338,10 @@ pub async fn post_complete(
         Ok(n) => n,
         Err(e) => {
             tracing::error!(user_id = %user_id, error = ?e, "onboarding.complete: failed to verify photo upload");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to verify photo upload");
+            return write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to verify photo upload",
+            );
         }
     };
     if photo_count == 0 {
@@ -303,13 +350,20 @@ pub async fn post_complete(
     }
     if let Err(e) = state.user_repo.ensure_life_story(user_id).await {
         tracing::error!(user_id = %user_id, error = ?e, "onboarding.complete: failed to initialize life story");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to initialize life story");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to initialize life story",
+        );
     }
 
     // Generate dashboard snapshot synchronously (best-effort).
     match generate_dashboard_snapshot(&state, user_id).await {
-        Ok(()) => tracing::debug!(user_id = %user_id, "onboarding.complete: dashboard snapshot generated"),
-        Err(e) => tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: dashboard snapshot failed (non-fatal)"),
+        Ok(()) => {
+            tracing::debug!(user_id = %user_id, "onboarding.complete: dashboard snapshot generated")
+        }
+        Err(e) => {
+            tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: dashboard snapshot failed (non-fatal)")
+        }
     }
 
     let _ = state
@@ -318,62 +372,40 @@ pub async fn post_complete(
         .await;
 
     // Enqueue character palette generation (single-flight per user/photo).
-    // Flash image generation prefers the palette as its identity reference.
+    // The static baseline is the required identity anchor for first generated
+    // experiences; dynamic variants are optional enhancements.
     match state.user_repo.get_primary_photo_by_user_id(user_id).await {
         Ok(photo) => {
-            match state
-                .user_repo
-                .claim_character_plate_generation(user_id, photo.id, CHARACTER_PLATE_PROMPT)
-                .await
+            if let Err(e) =
+                ensure_character_palette_jobs(&state, user_id, photo.id, "onboarding.complete")
+                    .await
             {
-                Ok((plate, claimed)) => {
-                    if claimed {
-                        if let Err(e) = state
-                            .job_client
-                            .insert(
-                                KIND_CHARACTER_PLATE,
-                                &CharacterPlateArgs {
-                                    user_id,
-                                    source_photo_id: photo.id,
-                                    plate_id: plate.id,
-                                },
-                            )
-                            .await
-                        {
-                            tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: failed to enqueue character plate job (non-fatal)");
-                        } else {
-                            tracing::info!(
-                                user_id = %user_id,
-                                plate_id = %plate.id,
-                                source_photo_id = %photo.id,
-                                "onboarding.complete: enqueued character plate generation"
-                            );
-                        }
-                    } else {
-                        tracing::debug!(
-                            user_id = %user_id,
-                            plate_id = %plate.id,
-                            status = %plate.status,
-                            "onboarding.complete: character plate already in flight or ready"
-                        );
-                    }
-                }
-                Err(e) => tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: claim_character_plate_generation failed (non-fatal)"),
+                tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: character palette generation setup failed (non-fatal)")
             }
         }
-        Err(e) => tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: no primary photo for character plate (non-fatal)"),
+        Err(e) => {
+            tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: no primary photo for character plate (non-fatal)")
+        }
     }
 
     // Non-blocking: suggested first decision + what-if
     let s_clone = state.clone();
     tokio::spawn(async move {
         match generate_suggested_first_decision(&s_clone, user_id).await {
-            Ok(()) => tracing::debug!(user_id = %user_id, "onboarding.complete: suggested first decision generated"),
-            Err(e) => tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: suggested first decision failed (non-fatal)"),
+            Ok(()) => {
+                tracing::debug!(user_id = %user_id, "onboarding.complete: suggested first decision generated")
+            }
+            Err(e) => {
+                tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: suggested first decision failed (non-fatal)")
+            }
         }
         match generate_suggested_first_what_if(&s_clone, user_id).await {
-            Ok(()) => tracing::debug!(user_id = %user_id, "onboarding.complete: suggested first what-if generated"),
-            Err(e) => tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: suggested first what-if failed (non-fatal)"),
+            Ok(()) => {
+                tracing::debug!(user_id = %user_id, "onboarding.complete: suggested first what-if generated")
+            }
+            Err(e) => {
+                tracing::warn!(user_id = %user_id, error = ?e, "onboarding.complete: suggested first what-if failed (non-fatal)")
+            }
         }
     });
 
@@ -383,13 +415,23 @@ pub async fn post_complete(
 
 async fn generate_dashboard_snapshot(state: &AppState, user_id: Uuid) -> anyhow::Result<()> {
     let profile = state.user_repo.get_profile_by_user_id(user_id).await?;
-    let life_state = state.user_repo.build_life_state(user_id).await.unwrap_or_else(|_| models::LifeState::default_state());
-    let life_story = state.user_repo.get_life_story_by_user_id(user_id).await.ok();
+    let life_state = state
+        .user_repo
+        .build_life_state(user_id)
+        .await
+        .unwrap_or_else(|_| models::LifeState::default_state());
+    let life_story = state
+        .user_repo
+        .get_life_story_by_user_id(user_id)
+        .await
+        .ok();
     let mut sctx = SimulationContext::default();
     sctx.user = Some(profile);
     sctx.life_state = life_state;
     sctx.life_story = life_story;
-    let (sys, user) = state.prompt_builder.build_text_prompt(prompts::TASK_DASHBOARD, &sctx);
+    let (sys, user) = state
+        .prompt_builder
+        .build_text_prompt(prompts::TASK_DASHBOARD, &sctx);
     let r = state
         .text_provider
         .generate_text(&TextRequest {
@@ -407,10 +449,22 @@ async fn generate_dashboard_snapshot(state: &AppState, user_id: Uuid) -> anyhow:
         .upsert_dashboard_snapshot(
             Uuid::new_v4(),
             user_id,
-            &parsed.get("life_quality_trajectory").cloned().unwrap_or(JsonValue::Null),
-            &parsed.get("life_momentum_score").cloned().unwrap_or(JsonValue::Null),
-            &parsed.get("probability_outlook").cloned().unwrap_or(JsonValue::Null),
-            parsed.get("narrative_summary").and_then(|v| v.as_str()).unwrap_or(""),
+            &parsed
+                .get("life_quality_trajectory")
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            &parsed
+                .get("life_momentum_score")
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            &parsed
+                .get("probability_outlook")
+                .cloned()
+                .unwrap_or(JsonValue::Null),
+            parsed
+                .get("narrative_summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
             &r.content,
             chrono::Utc::now(),
         )
@@ -438,7 +492,10 @@ async fn generate_suggested_first_decision(state: &AppState, user_id: Uuid) -> a
         })
         .await?;
     let parsed: JsonValue = serde_json::from_str(&r.content)?;
-    state.user_repo.set_suggested_first_decision(user_id, &parsed).await?;
+    state
+        .user_repo
+        .set_suggested_first_decision(user_id, &parsed)
+        .await?;
     Ok(())
 }
 
@@ -462,7 +519,10 @@ async fn generate_suggested_first_what_if(state: &AppState, user_id: Uuid) -> an
         })
         .await?;
     let parsed: JsonValue = serde_json::from_str(&r.content)?;
-    state.user_repo.set_suggested_first_what_if(user_id, &parsed).await?;
+    state
+        .user_repo
+        .set_suggested_first_what_if(user_id, &parsed)
+        .await?;
     Ok(())
 }
 
@@ -477,13 +537,21 @@ pub async fn get_profile(
             return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to get profile");
         }
     };
-    let story = state.user_repo.get_life_story_by_user_id(user_id).await.ok();
+    let story = state
+        .user_repo
+        .get_life_story_by_user_id(user_id)
+        .await
+        .ok();
 
     let mut photo_url: Option<String> = None;
     if let Ok(photo) = state.user_repo.get_primary_photo_by_user_id(user_id).await {
         match state
             .object_store
-            .get_signed_url(&state.cfg.s3_bucket, &photo.storage_path, Duration::from_secs(3600))
+            .get_signed_url(
+                &state.cfg.s3_bucket,
+                &photo.storage_path,
+                Duration::from_secs(3600),
+            )
             .await
         {
             Ok(s) => photo_url = Some(s),
@@ -542,11 +610,18 @@ pub async fn patch_profile(
 ) -> Response {
     if let Err(e) = state
         .user_repo
-        .update_financials(user_id, req.estimated_net_worth, req.estimated_yearly_salary)
+        .update_financials(
+            user_id,
+            req.estimated_net_worth,
+            req.estimated_yearly_salary,
+        )
         .await
     {
         tracing::error!(error = ?e, "patch_profile: failed to update profile");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update profile");
+        return write_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed to update profile",
+        );
     }
     if req.risk_tolerance.is_some()
         || req.follow_through.is_some()
@@ -567,7 +642,10 @@ pub async fn patch_profile(
             .await
         {
             tracing::error!(error = ?e, "patch_profile: failed to update profile");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update profile");
+            return write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to update profile",
+            );
         }
     }
     write_json(StatusCode::OK, json!({"status": "ok"}))
@@ -588,7 +666,11 @@ pub async fn patch_life_context(
     if req.raw_input.is_empty() {
         return write_error(StatusCode::BAD_REQUEST, "raw_input is required");
     }
-    let method = if req.input_method.is_empty() { "text".into() } else { req.input_method };
+    let method = if req.input_method.is_empty() {
+        "text".into()
+    } else {
+        req.input_method
+    };
     let story = LifeStory {
         id: Uuid::new_v4(),
         user_id,
@@ -603,7 +685,10 @@ pub async fn patch_life_context(
         Ok(id) => id,
         Err(e) => {
             tracing::error!(error = ?e, "patch_life_context: failed to update life context");
-            return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update life context");
+            return write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to update life context",
+            );
         }
     };
     let _ = state
@@ -625,7 +710,10 @@ pub async fn get_suggested_decision(
         Ok(_) => write_json(StatusCode::ACCEPTED, json!({"status": "generating"})),
         Err(e) => {
             tracing::error!(error = ?e, "get_suggested_decision: failed to get suggested decision");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to get suggested decision")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to get suggested decision",
+            )
         }
     }
 }
@@ -639,7 +727,10 @@ pub async fn get_suggested_what_if(
         Ok(_) => write_json(StatusCode::ACCEPTED, json!({"status": "generating"})),
         Err(e) => {
             tracing::error!(error = ?e, "get_suggested_what_if: failed to get suggested what-if");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to get suggested what-if")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to get suggested what-if",
+            )
         }
     }
 }
@@ -652,7 +743,10 @@ pub async fn get_life_state(
         Ok(ls) => write_json(StatusCode::OK, ls),
         Err(e) => {
             tracing::error!(error = ?e, "get_life_state: failed to load life state");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to load life state")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to load life state",
+            )
         }
     }
 }

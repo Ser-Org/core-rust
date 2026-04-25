@@ -29,7 +29,10 @@ async fn upload_tiny_file() {
 
     let data = vec![0u8; 128];
     let path = format!("smoke-test/{}.bin", uuid::Uuid::new_v4());
-    match store.upload(&bucket, &path, data, "application/octet-stream").await {
+    match store
+        .upload(&bucket, &path, data, "application/octet-stream")
+        .await
+    {
         Ok(url) => {
             println!("upload OK: {}", url);
             let _ = store.delete(&bucket, &path).await;

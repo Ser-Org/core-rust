@@ -23,8 +23,10 @@ impl SimulationRepository {
         sqlx::query(
             "INSERT INTO decision_simulations
                (id, decision_id, user_id, status, total_components, completed_components, run_type,
-                user_context_snapshot, life_state_snapshot, data_completeness, started_at, created_at)
-             VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, now())",
+                user_context_snapshot, life_state_snapshot, data_completeness, started_at,
+                parent_simulation_id, run_number, assumption_overrides, assumptions_calibrated_at,
+                created_at)
+             VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())",
         )
         .bind(sim.id)
         .bind(sim.decision_id)
@@ -36,6 +38,10 @@ impl SimulationRepository {
         .bind(&sim.life_state_snapshot)
         .bind(sim.data_completeness)
         .bind(sim.started_at)
+        .bind(sim.parent_simulation_id)
+        .bind(sim.run_number)
+        .bind(&sim.assumption_overrides)
+        .bind(sim.assumptions_calibrated_at)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -54,7 +60,10 @@ impl SimulationRepository {
         Ok(s)
     }
 
-    pub async fn get_simulation_by_decision_id(&self, decision_id: Uuid) -> Result<DecisionSimulation> {
+    pub async fn get_simulation_by_decision_id(
+        &self,
+        decision_id: Uuid,
+    ) -> Result<DecisionSimulation> {
         let s = sqlx::query_as::<_, DecisionSimulation>(
             "SELECT id, decision_id, user_id, status, total_components, completed_components,
                     run_type, user_context_snapshot, life_state_snapshot, data_completeness::float8 AS data_completeness, started_at, completed_at, created_at,
@@ -325,39 +334,73 @@ impl SimulationRepository {
         Ok(rows)
     }
 
-    pub async fn get_assumption_by_id(&self, id: Uuid) -> Result<SimulationAssumption> {
+    pub async fn get_assumption_by_id_for_simulation(
+        &self,
+        id: Uuid,
+        simulation_id: Uuid,
+    ) -> Result<SimulationAssumption> {
         let a = sqlx::query_as::<_, SimulationAssumption>(
             "SELECT id, simulation_id, description, confidence::float8 AS confidence,
                     COALESCE(source, '') AS source, COALESCE(kind, '') AS kind, COALESCE(grounding, '') AS grounding,
                     COALESCE(evidence_refs, '{}'::text[]) AS evidence_refs,
                     category, editable, user_override_value, original_confidence::float8 AS original_confidence, profile_field, created_at, updated_at
-             FROM simulation_assumptions WHERE id = $1",
+             FROM simulation_assumptions WHERE id = $1 AND simulation_id = $2",
         )
         .bind(id)
+        .bind(simulation_id)
         .fetch_one(&self.pool)
         .await?;
         Ok(a)
     }
 
-    pub async fn update_assumption(
+    pub async fn update_assumption_for_simulation(
         &self,
         id: Uuid,
+        simulation_id: Uuid,
         override_value: Option<&str>,
         confidence: Option<f64>,
-    ) -> Result<()> {
-        sqlx::query(
+    ) -> Result<bool> {
+        let res = sqlx::query(
             "UPDATE simulation_assumptions
              SET user_override_value = COALESCE($2, user_override_value),
                  original_confidence = CASE WHEN original_confidence IS NULL THEN confidence ELSE original_confidence END,
                  confidence = COALESCE($3, confidence),
                  updated_at = now()
-             WHERE id = $1",
+             WHERE id = $1 AND simulation_id = $4",
         )
         .bind(id)
         .bind(override_value)
         .bind(confidence)
+        .bind(simulation_id)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(res.rows_affected() > 0)
+    }
+
+    pub async fn update_assumption_for_user(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        override_value: Option<&str>,
+        confidence: Option<f64>,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            "UPDATE simulation_assumptions AS a
+             SET user_override_value = COALESCE($2, a.user_override_value),
+                 original_confidence = CASE WHEN a.original_confidence IS NULL THEN a.confidence ELSE a.original_confidence END,
+                 confidence = COALESCE($3, a.confidence),
+                 updated_at = now()
+             FROM decision_simulations AS ds
+             WHERE a.id = $1
+               AND a.simulation_id = ds.id
+               AND ds.user_id = $4",
+        )
+        .bind(id)
+        .bind(override_value)
+        .bind(confidence)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
     }
 }

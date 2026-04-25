@@ -77,7 +77,12 @@ impl FlashRepository {
         } else {
             "UPDATE flash_visions SET status = $1, error_message = $2, updated_at = now() WHERE id = $3"
         };
-        sqlx::query(q).bind(status).bind(error_msg).bind(id).execute(&self.pool).await?;
+        sqlx::query(q)
+            .bind(status)
+            .bind(error_msg)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

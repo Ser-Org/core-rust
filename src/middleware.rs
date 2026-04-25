@@ -41,8 +41,12 @@ impl AuthConfig {
         };
         if !jwks_url.is_empty() {
             match cfg.refresh_jwks().await {
-                Ok(()) => tracing::info!(jwks_url = %jwks_url, keys = cache.len(), "auth: JWKS loaded"),
-                Err(e) => tracing::warn!(jwks_url = %jwks_url, error = ?e, "auth: could not load JWKS at startup"),
+                Ok(()) => {
+                    tracing::info!(jwks_url = %jwks_url, keys = cache.len(), "auth: JWKS loaded")
+                }
+                Err(e) => {
+                    tracing::warn!(jwks_url = %jwks_url, error = ?e, "auth: could not load JWKS at startup")
+                }
             }
         }
         cfg

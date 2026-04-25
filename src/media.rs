@@ -25,38 +25,15 @@ pub const DEFAULT_PIPELINE_VIDEO_ASPECT_RATIO: &str = "1280:720";
 const STAGE1_FLUX_WIDTH: u32 = 2048;
 const STAGE1_FLUX_HEIGHT: u32 = 1152;
 
-/// Wrap for the scene prompt handed to Flux. The prefix carries the
-/// subject-placement directive (Flux must treat the reference as "this
-/// person in the scene", not "reproduce the reference"); the suffix
-/// carries cinematic camera/lens/grade language so Runway's motion stage
-/// inherits the composition instead of being asked to reinvent it.
-const PIPELINE_SCENE_PREFIX: &str = "Place the subject from the reference image into the scene described. Preserve their exact facial features, hair, skin tone, and build — this is the same person. The subject faces the camera directly (forward-facing, head and shoulders squared to the lens); do not render profile or back views. Scene: ";
-const PIPELINE_SCENE_SUFFIX: &str = " Cinematic photograph, shot on Sony A7 IV with a 35mm f/1.4 lens, available light, 4K ultra-detailed. Natural skin with visible pore texture and subtle asymmetry — reject smooth \"AI face\" look. Anatomically correct hands with five visible fingers. Documentary prestige-film aesthetic, Kodak Portra 800 palette. Pure photograph; no illustration or stylization.";
-const PIPELINE_SCENE_CONSTRAINTS: &str = "\n\nConstraints: no visible text, typography, captions, signage, logos, or device screens/UI. Horizontal 16:9 framing. Only the subject appears; no other people in the frame.";
-
-/// Suffix appended to the motion prompt handed to Runway gen4.5. Tells the
-/// model not to invent additional people during the animation — the scene
-/// base already establishes who is in the frame. Runway's `promptText`
-/// accepts ~1000 UTF-16 code units; keep the total under MOTION_PROMPT_MAX_BYTES.
-const PIPELINE_MOTION_SUFFIX: &str = " No other people appear in the frame; do not introduce additional subjects or extras at any point in the clip.";
-const PIPELINE_MOTION_PROMPT_MAX_BYTES: usize = 950;
-/// Leaves headroom for BFL Flux prompt limits. Flux is more generous than
-/// Runway's 1000-UTF-16 cap, but staying under 2KB avoids surprises.
-const PIPELINE_PROMPT_MAX_BYTES: usize = 2000;
-
-/// Trim `s` to at most `max_bytes`, backing up to the nearest UTF-8 char
-/// boundary. Never panics on multi-byte chars. Mirrors the helper in
-/// src/jobs/worker.rs — intentional duplicate until a shared utils module exists.
-fn truncate_to_byte_boundary(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
+/// Stage 1 (Flux) prompt assembly — including the prefix, suffix, constraints,
+/// and identity-lock tail — lives in `prompts::build_flux_scene_prompt`.
+/// Identity-preservation reinforcement and user-state-block injection happen
+/// there so all prompt construction has one home.
+///
+/// Stage 2 motion-prompt polish (no-other-subjects suffix + byte-budget
+/// trimming) is provider-specific and now lives in the provider:
+/// `src/providers/runway.rs::polish_gen4_i2v_prompt`. Media pipeline passes
+/// the motion prompt through unchanged; provider applies its own finishing.
 
 #[derive(Clone)]
 pub struct MediaPipeline {
@@ -92,9 +69,7 @@ impl MediaPipeline {
 
     pub async fn execute(&self, input: PipelineInput) -> Result<PipelineOutput> {
         let started = std::time::Instant::now();
-        let seed: i64 = input
-            .seed
-            .unwrap_or_else(|| rand::random::<u32>() as i64);
+        let seed: i64 = input.seed.unwrap_or_else(|| rand::random::<u32>() as i64);
         tracing::info!(
             simulation_id = %input.simulation_id,
             user_id = %input.user_id,
@@ -107,8 +82,14 @@ impl MediaPipeline {
             seed,
             "media_pipeline: execute start"
         );
-        let scene = self.execute_stage1(&input, seed).await.context("stage 1 (base)")?;
-        let motion = self.execute_stage2(&input, &scene, seed).await.context("stage 2 (motion)")?;
+        let scene = self
+            .execute_stage1(&input, seed)
+            .await
+            .context("stage 1 (base)")?;
+        let motion = self
+            .execute_stage2(&input, &scene, seed)
+            .await
+            .context("stage 2 (motion)")?;
 
         tracing::info!(
             simulation_id = %input.simulation_id,
@@ -131,26 +112,12 @@ impl MediaPipeline {
             ));
         }
 
-        // Size-budget the variable scene text so prefix + suffix + constraints
-        // always fit under PIPELINE_PROMPT_MAX_BYTES.
-        let fixed_len = PIPELINE_SCENE_PREFIX.len()
-            + PIPELINE_SCENE_SUFFIX.len()
-            + PIPELINE_SCENE_CONSTRAINTS.len();
-        let scene_budget = PIPELINE_PROMPT_MAX_BYTES.saturating_sub(fixed_len);
-        let scene_trimmed = truncate_to_byte_boundary(&input.scene_prompt, scene_budget);
-        if scene_trimmed.len() < input.scene_prompt.len() {
-            tracing::debug!(
-                simulation_id = %input.simulation_id,
-                clip_tag = %input.clip_tag,
-                original_len = input.scene_prompt.len(),
-                trimmed_len = scene_trimmed.len(),
-                "media_pipeline: stage 1 trimmed scene prompt to fit budget"
-            );
-        }
-        let final_prompt = format!(
-            "{}{}{}{}",
-            PIPELINE_SCENE_PREFIX, scene_trimmed, PIPELINE_SCENE_SUFFIX, PIPELINE_SCENE_CONSTRAINTS
-        );
+        // Stage 1 prompt assembly — including prefix, user-state injection,
+        // suffix, constraints, and identity-lock tail — is in prompts.rs.
+        // The variable middle (user_state_block + scene_prompt) is byte-trimmed
+        // there to keep the assembled prompt under prompts::PIPELINE_PROMPT_MAX_BYTES.
+        let final_prompt =
+            crate::prompts::build_flux_scene_prompt(&input.user_state_block, &input.scene_prompt);
 
         tracing::info!(
             simulation_id = %input.simulation_id,
@@ -159,6 +126,8 @@ impl MediaPipeline {
             height = STAGE1_FLUX_HEIGHT,
             seed,
             scene_prompt_preview = %truncate_for_log(&input.scene_prompt, 200),
+            user_state_block_preview = %truncate_for_log(&input.user_state_block, 200),
+            user_state_block_bytes = input.user_state_block.len(),
             final_prompt_bytes = final_prompt.len(),
             "media_pipeline: stage 1 (flux-2-max) starting"
         );
@@ -210,7 +179,12 @@ impl MediaPipeline {
         );
         let storage_path = self.stage_path(input, "scene_base.png");
         self.object_store
-            .upload(&self.media_bucket, &storage_path, resp.image_bytes.clone(), &resp.mime_type)
+            .upload(
+                &self.media_bucket,
+                &storage_path,
+                resp.image_bytes.clone(),
+                &resp.mime_type,
+            )
             .await?;
         let signed_url = self
             .object_store
@@ -238,7 +212,11 @@ impl MediaPipeline {
         seed: i64,
     ) -> Result<PipelineArtifact> {
         let started = std::time::Instant::now();
-        let dur = if input.duration_secs < 2 { 10 } else { input.duration_secs };
+        let dur = if input.duration_secs < 2 {
+            10
+        } else {
+            input.duration_secs
+        };
 
         // Note: we intentionally do NOT pass `character_plate_url` as a
         // referenceImage here. Stage 1 (Flux) has already composed the
@@ -246,20 +224,18 @@ impl MediaPipeline {
         // signal caused subtle face drift as Runway blended two slightly
         // different faces. gen4.5 anchors on the scene base alone.
 
-        // Wrap the motion prompt with a no-other-subjects constraint, staying
-        // under Runway's ~1000 UTF-16 cap on promptText.
-        let motion_budget = PIPELINE_MOTION_PROMPT_MAX_BYTES.saturating_sub(PIPELINE_MOTION_SUFFIX.len());
-        let motion_trimmed = truncate_to_byte_boundary(&input.motion_prompt, motion_budget);
-        let final_motion_prompt = format!("{}{}", motion_trimmed, PIPELINE_MOTION_SUFFIX);
-
+        // Motion prompt is passed through unchanged. Provider-specific
+        // finishing (no-other-subjects suffix, byte-budget trimming for
+        // Runway's ~1000 UTF-16 cap) happens inside `RunwayProvider` now.
+        // Veo/Seedance will apply their own finishing when those providers land.
         tracing::info!(
             simulation_id = %input.simulation_id,
             clip_tag = %input.clip_tag,
             duration_secs = dur,
             input_scene_bytes = scene.data.len(),
             seed,
-            motion_prompt_preview = %truncate_for_log(&final_motion_prompt, 200),
-            "media_pipeline: stage 2 (gen4.5) starting"
+            motion_prompt_preview = %truncate_for_log(&input.motion_prompt, 200),
+            "media_pipeline: stage 2 starting"
         );
         let model = if self.video_model.is_empty() {
             "gen4.5".to_string()
@@ -269,7 +245,7 @@ impl MediaPipeline {
         let resp = self
             .video_provider
             .generate_video(&VideoRequest {
-                prompt: final_motion_prompt,
+                prompt: input.motion_prompt.clone(),
                 model,
                 input_image_url: scene.storage_url.clone(),
                 reference_images: vec![],
@@ -277,6 +253,12 @@ impl MediaPipeline {
                 duration_secs: dur,
                 input_video_url: String::new(),
                 seed: Some(seed),
+                // Structured fields — Veo-family providers compose them into
+                // a 5-part prompt; gen4.x ignores and uses `prompt` only.
+                scene_prompt: input.scene_prompt.clone(),
+                edit_prompt: input.edit_prompt.clone(),
+                narration_text: input.narration_text.clone(),
+                ..Default::default()
             })
             .await
             .map_err(|e| {
@@ -305,7 +287,12 @@ impl MediaPipeline {
         );
         let storage_path = self.stage_path(input, "motion.mp4");
         self.object_store
-            .upload(&self.media_bucket, &storage_path, resp.video_data.clone(), &resp.mime_type)
+            .upload(
+                &self.media_bucket,
+                &storage_path,
+                resp.video_data.clone(),
+                &resp.mime_type,
+            )
             .await?;
         let signed_url = self
             .object_store
@@ -354,7 +341,19 @@ pub struct PipelineInput {
     pub clip_tag: String,
     /// Optional. When unset, `execute` generates a per-run seed and reuses it
     /// across all three stages for character-identity consistency within a clip.
+    /// Callers SHOULD pass a `simulation_id`-derived seed here so all phases of
+    /// a single simulation share one seed and faces don't drift across clips.
     pub seed: Option<i64>,
+    /// Short prose description of the subject (age, profession, bearing,
+    /// wardrobe/aesthetic hints) injected into the Stage 1 Flux prompt as
+    /// `Subject context: ...`. Empty string means "no extra context" — the
+    /// pipeline still works, it just doesn't carry user-state into the frame.
+    /// See `crate::prompts::build_user_state_block`.
+    pub user_state_block: String,
+    /// Narration line emitted by the scenario planner per phase. Runway
+    /// gen4.x ignores it; Veo-family providers weave it as spoken dialogue
+    /// in the assembled prompt. Empty when the planner emitted nothing.
+    pub narration_text: String,
 }
 
 #[derive(Debug, Clone, Default)]

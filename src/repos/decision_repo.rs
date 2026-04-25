@@ -65,11 +65,13 @@ impl DecisionRepository {
     }
 
     pub async fn update_time_horizon_months(&self, id: Uuid, months: i32) -> Result<()> {
-        sqlx::query("UPDATE decisions SET time_horizon_months = $1, updated_at = now() WHERE id = $2")
-            .bind(months)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE decisions SET time_horizon_months = $1, updated_at = now() WHERE id = $2",
+        )
+        .bind(months)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 }

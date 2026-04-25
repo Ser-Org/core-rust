@@ -1,4 +1,5 @@
 use crate::providers::*;
+use crate::utils::truncate_to_byte_boundary;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
@@ -39,8 +40,8 @@ const VEO3_FIXED_DURATION: u32 = 8;
 // Runway-hosted Seedance 2.0: image-to-video only, wider ratio enum, 4-15s
 // duration window, no seed/moderation/referenceImages, audio toggle exposed.
 const SEEDANCE2_I2V_RATIOS: &[&str] = &[
-    "992:432", "864:496", "752:560", "640:640", "560:752", "496:864",
-    "1470:630", "1280:720", "1112:834", "960:960", "834:1112", "720:1280",
+    "992:432", "864:496", "752:560", "640:640", "560:752", "496:864", "1470:630", "1280:720",
+    "1112:834", "960:960", "834:1112", "720:1280",
 ];
 const SEEDANCE2_MIN_DURATION: u32 = 4;
 const SEEDANCE2_MAX_DURATION: u32 = 15;
@@ -52,6 +53,79 @@ fn is_veo3_family(model: &str) -> bool {
 
 fn is_seedance2(model: &str) -> bool {
     model == MODEL_SEEDANCE2
+}
+
+/// Runway-specific polish applied to gen4.x image-to-video motion prompts.
+/// Keeps the scene base's subject as the only person in frame — the image
+/// anchor establishes who appears, and any additional subject invented during
+/// animation breaks continuity.
+///
+/// Lives in the provider (not in the adapter or media pipeline) because the
+/// suffix + byte budget are Runway-API concerns; other providers (Veo,
+/// Seedance) have different limits and different discipline.
+const MOTION_SUFFIX_GEN4: &str = " No other people appear in the frame; do not introduce additional subjects or extras at any point in the clip.";
+
+/// Runway's `promptText` field accepts <=1000 UTF-16 code units; 950 bytes
+/// leaves margin for multi-byte chars (em-dashes, smart quotes from Claude).
+const PROMPT_TEXT_MAX_BYTES: usize = 950;
+
+/// Append `MOTION_SUFFIX_GEN4` to a motion prompt, trimming the variable
+/// portion so the full assembled string fits under `PROMPT_TEXT_MAX_BYTES`.
+/// Used for gen4.x image-to-video only. Veo3/Seedance2 families skip this
+/// polish (different API limits and different continuity disciplines).
+fn polish_gen4_i2v_prompt(raw: &str) -> String {
+    let budget = PROMPT_TEXT_MAX_BYTES.saturating_sub(MOTION_SUFFIX_GEN4.len());
+    let trimmed = truncate_to_byte_boundary(raw, budget);
+    format!("{}{}", trimmed, MOTION_SUFFIX_GEN4)
+}
+
+/// Veo-family solo-subject constraint. Same intent as the gen4 suffix
+/// (prevent the animation from inventing additional people) but kept as its
+/// own constant so we can adjust language independently — Veo responds to
+/// different phrasing than gen4.
+const SOLO_SUBJECT_CONSTRAINT_VEO: &str =
+    " The subject is the only person visible in the frame throughout the clip; do not introduce additional figures.";
+
+/// Compose a Veo-tailored prompt from the scenario_planner's structured
+/// fields. Maps loosely to Veo 3.1's recommended 5-part formula
+/// (Cinematography + Subject + Action + Context + Style & Ambiance):
+///
+/// - `scene_prompt` carries cinematography + subject + context (first-frame
+///   composition and camera/lens language, per the scenario planner's
+///   system prompt).
+/// - `motion_prompt` carries action.
+/// - `edit_prompt` carries style / ambiance / grade.
+/// - `narration_text`, if non-empty, is woven as spoken dialogue using Veo's
+///   quoted-line convention.
+///
+/// Falls back gracefully: missing parts are omitted, empty input still
+/// produces the solo-subject constraint. Total output is trimmed to
+/// `PROMPT_TEXT_MAX_BYTES`; the trailing constraint is fixed and never
+/// trimmed (identity/continuity discipline).
+fn polish_veo3_i2v_prompt(
+    scene_prompt: &str,
+    motion_prompt: &str,
+    edit_prompt: &str,
+    narration_text: &str,
+) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    if !scene_prompt.is_empty() {
+        segments.push(scene_prompt.to_string());
+    }
+    if !motion_prompt.is_empty() {
+        segments.push(motion_prompt.to_string());
+    }
+    if !edit_prompt.is_empty() {
+        segments.push(format!("Style: {}", edit_prompt));
+    }
+    if !narration_text.is_empty() {
+        // Veo's convention for spoken dialogue: a character says, "line."
+        segments.push(format!("The subject says, \"{}\"", narration_text));
+    }
+    let body = segments.join(". ");
+    let budget = PROMPT_TEXT_MAX_BYTES.saturating_sub(SOLO_SUBJECT_CONSTRAINT_VEO.len());
+    let trimmed = truncate_to_byte_boundary(&body, budget);
+    format!("{}{}", trimmed, SOLO_SUBJECT_CONSTRAINT_VEO)
 }
 
 pub struct RunwayProvider {
@@ -207,11 +281,11 @@ struct RunwayValidationErr {
 /// logs don't drown in base64. Final result is capped to `max_bytes`.
 fn log_safe_body<T: Serialize>(body: &T, max_bytes: usize) -> String {
     const HEAVY_FIELDS: &[&str] = &[
-        "uri",           // ReferenceImage.uri
-        "promptImage",   // ImageToVideoRequest.prompt_image
-        "videoUri",      // VideoToVideoRequest.video_uri
-        "inputImage",    // general
-        "input_image",   // general
+        "uri",         // ReferenceImage.uri
+        "promptImage", // ImageToVideoRequest.prompt_image
+        "videoUri",    // VideoToVideoRequest.video_uri
+        "inputImage",  // general
+        "input_image", // general
     ];
     let mut v = serde_json::to_value(body).unwrap_or(serde_json::Value::Null);
     scrub_heavy_fields(&mut v, HEAVY_FIELDS, 256);
@@ -219,7 +293,11 @@ fn log_safe_body<T: Serialize>(body: &T, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         s
     } else {
-        format!("{}…[+{} bytes elided]", &s[..max_bytes], s.len() - max_bytes)
+        format!(
+            "{}…[+{} bytes elided]",
+            &s[..max_bytes],
+            s.len() - max_bytes
+        )
     }
 }
 
@@ -286,7 +364,11 @@ fn format_runway_error(raw: &str) -> String {
     }
     for issue in resp.issues {
         let path = issue.path.join(".");
-        let line = match (path.is_empty(), issue.message.is_empty(), issue.code.is_empty()) {
+        let line = match (
+            path.is_empty(),
+            issue.message.is_empty(),
+            issue.code.is_empty(),
+        ) {
             (false, false, _) => format!("{}: {}", path, issue.message),
             (false, true, false) => format!("{}: {}", path, issue.code),
             (false, true, true) => path,
@@ -400,7 +482,10 @@ impl RunwayProvider {
                         "PENDING" | "RUNNING" => continue,
                         "THROTTLED" => {
                             if !throttled_logged {
-                                tracing::info!(task_id, "runway: task throttled, continuing to poll");
+                                tracing::info!(
+                                    task_id,
+                                    "runway: task throttled, continuing to poll"
+                                );
                                 throttled_logged = true;
                             }
                             continue;
@@ -454,7 +539,12 @@ impl RunwayProvider {
             "runway: GET status response"
         );
         if !status.is_success() {
-            return Err(anyhow!("runway: get status {} -> {} (raw={})", task_id, status, raw));
+            return Err(anyhow!(
+                "runway: get status {} -> {} (raw={})",
+                task_id,
+                status,
+                raw
+            ));
         }
         let s: TaskStatusResponse = serde_json::from_str(&raw)
             .map_err(|e| anyhow!("decode status: {} (raw={})", e, raw))?;
@@ -471,7 +561,11 @@ impl RunwayProvider {
         })?;
         let status = resp.status();
         if !status.is_success() {
-            tracing::error!(url, status_code = status.as_u16(), "runway: download non-2xx");
+            tracing::error!(
+                url,
+                status_code = status.as_u16(),
+                "runway: download non-2xx"
+            );
             return Err(anyhow!("download returned {}", status));
         }
         let bytes = resp.bytes().await?.to_vec();
@@ -491,7 +585,10 @@ fn validate_allowed(endpoint: &str, field: &str, value: &str, allowed: &[&str]) 
     }
     Err(anyhow::Error::from(HttpError {
         status_code: 400,
-        message: format!("{}: invalid {} \"{}\" (expected one of {:?})", endpoint, field, value, allowed),
+        message: format!(
+            "{}: invalid {} \"{}\" (expected one of {:?})",
+            endpoint, field, value, allowed
+        ),
     }))
 }
 
@@ -500,7 +597,10 @@ fn validate_i2v(ratio: &str, duration: u32) -> Result<()> {
     if !(2..=10).contains(&duration) {
         return Err(anyhow::Error::from(HttpError {
             status_code: 400,
-            message: format!("image_to_video: invalid duration {} (expected 2-10)", duration),
+            message: format!(
+                "image_to_video: invalid duration {} (expected 2-10)",
+                duration
+            ),
         }));
     }
     Ok(())
@@ -521,7 +621,12 @@ fn validate_veo3_i2v(ratio: &str, duration: u32) -> Result<()> {
 }
 
 fn validate_seedance2_i2v(ratio: &str, duration: u32) -> Result<()> {
-    validate_allowed("image_to_video[seedance2]", "ratio", ratio, SEEDANCE2_I2V_RATIOS)?;
+    validate_allowed(
+        "image_to_video[seedance2]",
+        "ratio",
+        ratio,
+        SEEDANCE2_I2V_RATIOS,
+    )?;
     if !(SEEDANCE2_MIN_DURATION..=SEEDANCE2_MAX_DURATION).contains(&duration) {
         return Err(anyhow::Error::from(HttpError {
             status_code: 400,
@@ -551,13 +656,24 @@ fn validate_t2v(ratio: &str, duration: u32) -> Result<()> {
 #[async_trait]
 impl ImageProvider for RunwayProvider {
     async fn generate_image(&self, req: &ImageRequest) -> Result<ImageResponse> {
-        let model = if req.model.is_empty() { "gen4_image" } else { &req.model };
-        let ratio = if req.aspect_ratio.is_empty() { "1920:1080" } else { &req.aspect_ratio };
+        let model = if req.model.is_empty() {
+            "gen4_image"
+        } else {
+            &req.model
+        };
+        let ratio = if req.aspect_ratio.is_empty() {
+            "1920:1080"
+        } else {
+            &req.aspect_ratio
+        };
         let refs: Vec<ReferenceImage> = req
             .reference_images
             .iter()
             .enumerate()
-            .map(|(i, u)| ReferenceImage { uri: u.clone(), tag: format!("ref{}", i) })
+            .map(|(i, u)| ReferenceImage {
+                uri: u.clone(),
+                tag: format!("ref{}", i),
+            })
             .collect();
         let body = TextToImageRequest {
             model: model.to_string(),
@@ -576,7 +692,11 @@ impl ImageProvider for RunwayProvider {
                 "runway image {} [task_id={} code={}]: {}",
                 status.status,
                 task_id,
-                if status.failure_code.is_empty() { "<none>" } else { &status.failure_code },
+                if status.failure_code.is_empty() {
+                    "<none>"
+                } else {
+                    &status.failure_code
+                },
                 status.failure
             ));
         }
@@ -612,7 +732,11 @@ impl FlashImageProvider for RunwayProvider {
                 "runway gen4_image {} [task_id={} code={}]: {}",
                 status.status,
                 task_id,
-                if status.failure_code.is_empty() { "<none>" } else { &status.failure_code },
+                if status.failure_code.is_empty() {
+                    "<none>"
+                } else {
+                    &status.failure_code
+                },
                 status.failure
             ));
         }
@@ -653,7 +777,11 @@ impl FlashImageProvider for RunwayProvider {
                 "runway gen4_image {} [task_id={} code={}]: {}",
                 status.status,
                 task_id,
-                if status.failure_code.is_empty() { "<none>" } else { &status.failure_code },
+                if status.failure_code.is_empty() {
+                    "<none>"
+                } else {
+                    &status.failure_code
+                },
                 status.failure
             ));
         }
@@ -674,9 +802,15 @@ impl FlashImageProvider for RunwayProvider {
 #[async_trait]
 impl VideoProvider for RunwayProvider {
     async fn generate_video(&self, req: &VideoRequest) -> Result<VideoResponse> {
-        let moderation = ContentModeration { public_figure_threshold: "auto".into() };
+        let moderation = ContentModeration {
+            public_figure_threshold: "auto".into(),
+        };
         let task_id = if !req.input_video_url.is_empty() {
-            let model = if req.model.is_empty() { MODEL_GEN4_ALEPH } else { &req.model };
+            let model = if req.model.is_empty() {
+                MODEL_GEN4_ALEPH
+            } else {
+                &req.model
+            };
             let ratio = req.aspect_ratio.clone();
             if !ratio.is_empty() {
                 validate_allowed("video_to_video", "ratio", &ratio, VIDEO_TO_VIDEO_RATIOS)?;
@@ -684,7 +818,10 @@ impl VideoProvider for RunwayProvider {
             let refs: Vec<VideoReference> = req
                 .reference_images
                 .iter()
-                .map(|u| VideoReference { kind: "image".into(), uri: u.clone() })
+                .map(|u| VideoReference {
+                    kind: "image".into(),
+                    uri: u.clone(),
+                })
                 .collect();
             let body = VideoToVideoRequest {
                 model: model.to_string(),
@@ -697,8 +834,16 @@ impl VideoProvider for RunwayProvider {
             };
             self.post_task("/video_to_video", &body).await?
         } else if !req.input_image_url.is_empty() {
-            let model = if req.model.is_empty() { MODEL_GEN45 } else { &req.model };
-            let ratio = if req.aspect_ratio.is_empty() { DEFAULT_I2V_RATIO.to_string() } else { req.aspect_ratio.clone() };
+            let model = if req.model.is_empty() {
+                MODEL_GEN45
+            } else {
+                &req.model
+            };
+            let ratio = if req.aspect_ratio.is_empty() {
+                DEFAULT_I2V_RATIO.to_string()
+            } else {
+                req.aspect_ratio.clone()
+            };
 
             let body = if is_veo3_family(model) {
                 // veo3 family: fixed 8s duration, no seed/moderation/refs.
@@ -719,10 +864,27 @@ impl VideoProvider for RunwayProvider {
                     );
                 }
                 validate_veo3_i2v(&ratio, VEO3_FIXED_DURATION)?;
+                // Veo-tailored prompt: composes scene + motion + edit (style)
+                // + narration (as spoken dialogue) into Veo's preferred 5-part
+                // shape. Falls back gracefully when fields are empty.
+                let polished_prompt = polish_veo3_i2v_prompt(
+                    &req.scene_prompt,
+                    &req.prompt,
+                    &req.edit_prompt,
+                    &req.narration_text,
+                );
+                tracing::debug!(
+                    model,
+                    scene_bytes = req.scene_prompt.len(),
+                    motion_bytes = req.prompt.len(),
+                    narration_bytes = req.narration_text.len(),
+                    polished_bytes = polished_prompt.len(),
+                    "runway: applied veo3 i2v 5-part prompt polish"
+                );
                 ImageToVideoRequest {
                     model: model.to_string(),
                     prompt_image: req.input_image_url.clone(),
-                    prompt_text: req.prompt.clone(),
+                    prompt_text: polished_prompt,
                     reference_images: vec![],
                     ratio,
                     duration: VEO3_FIXED_DURATION,
@@ -758,17 +920,31 @@ impl VideoProvider for RunwayProvider {
                     audio: Some(false),
                 }
             } else {
-                let duration = if req.duration_secs < 2 { DEFAULT_VIDEO_DURATION } else { req.duration_secs };
+                let duration = if req.duration_secs < 2 {
+                    DEFAULT_VIDEO_DURATION
+                } else {
+                    req.duration_secs
+                };
                 validate_i2v(&ratio, duration)?;
                 let refs: Vec<ImageReferenceSimple> = req
                     .reference_images
                     .iter()
                     .map(|u| ImageReferenceSimple { uri: u.clone() })
                     .collect();
+                // gen4.x i2v polish: append the no-other-subjects suffix and
+                // trim to fit promptText's UTF-16 cap. Applied only for
+                // gen4.x models — veo3/seedance2 branches above skip this.
+                let polished_prompt = polish_gen4_i2v_prompt(&req.prompt);
+                tracing::debug!(
+                    model,
+                    raw_bytes = req.prompt.len(),
+                    polished_bytes = polished_prompt.len(),
+                    "runway: applied gen4.x i2v motion-prompt polish"
+                );
                 ImageToVideoRequest {
                     model: model.to_string(),
                     prompt_image: req.input_image_url.clone(),
-                    prompt_text: req.prompt.clone(),
+                    prompt_text: polished_prompt,
                     reference_images: refs,
                     ratio,
                     duration,
@@ -779,10 +955,22 @@ impl VideoProvider for RunwayProvider {
             };
             self.post_task("/image_to_video", &body).await?
         } else {
-            let model = if req.model.is_empty() { MODEL_GEN45 } else { &req.model };
+            let model = if req.model.is_empty() {
+                MODEL_GEN45
+            } else {
+                &req.model
+            };
             if model == MODEL_GEN45 {
-                let ratio = if req.aspect_ratio.is_empty() { DEFAULT_I2V_RATIO.to_string() } else { req.aspect_ratio.clone() };
-                let duration = if req.duration_secs < 2 { DEFAULT_VIDEO_DURATION } else { req.duration_secs };
+                let ratio = if req.aspect_ratio.is_empty() {
+                    DEFAULT_I2V_RATIO.to_string()
+                } else {
+                    req.aspect_ratio.clone()
+                };
+                let duration = if req.duration_secs < 2 {
+                    DEFAULT_VIDEO_DURATION
+                } else {
+                    req.duration_secs
+                };
                 validate_i2v(&ratio, duration)?;
                 let body = ImageToVideoRequest {
                     model: model.to_string(),
@@ -797,8 +985,16 @@ impl VideoProvider for RunwayProvider {
                 };
                 self.post_task("/image_to_video", &body).await?
             } else {
-                let ratio = if req.aspect_ratio.is_empty() { DEFAULT_I2V_RATIO.to_string() } else { req.aspect_ratio.clone() };
-                let duration = if req.duration_secs == 0 { DEFAULT_TEXT_DURATION } else { req.duration_secs };
+                let ratio = if req.aspect_ratio.is_empty() {
+                    DEFAULT_I2V_RATIO.to_string()
+                } else {
+                    req.aspect_ratio.clone()
+                };
+                let duration = if req.duration_secs == 0 {
+                    DEFAULT_TEXT_DURATION
+                } else {
+                    req.duration_secs
+                };
                 validate_t2v(&ratio, duration)?;
                 let body = TextToVideoRequest {
                     model: model.to_string(),
@@ -818,7 +1014,11 @@ impl VideoProvider for RunwayProvider {
                 "runway video {} [task_id={} code={}]: {}",
                 status.status,
                 task_id,
-                if status.failure_code.is_empty() { "<none>" } else { &status.failure_code },
+                if status.failure_code.is_empty() {
+                    "<none>"
+                } else {
+                    &status.failure_code
+                },
                 status.failure
             ));
         }
@@ -832,5 +1032,125 @@ impl VideoProvider for RunwayProvider {
             duration_secs: req.duration_secs,
             provider_name: "runway".into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polish_gen4_i2v_prompt_appends_suffix_and_fits_under_cap() {
+        let raw = "the subject turns slowly toward the window";
+        let out = polish_gen4_i2v_prompt(raw);
+        // Always ends with the motion suffix (recency for Runway's attention).
+        assert!(
+            out.ends_with(MOTION_SUFFIX_GEN4),
+            "polish output did not end with motion suffix: {out}"
+        );
+        // Never exceeds Runway's promptText byte budget.
+        assert!(
+            out.len() <= PROMPT_TEXT_MAX_BYTES,
+            "polish output {} bytes exceeded cap {}",
+            out.len(),
+            PROMPT_TEXT_MAX_BYTES
+        );
+        // Raw content survives intact for short inputs.
+        assert!(out.starts_with(raw));
+    }
+
+    #[test]
+    fn polish_gen4_i2v_prompt_trims_variable_portion_under_cap() {
+        // Oversized motion prompt must be trimmed so the fixed suffix still fits.
+        let raw = "a".repeat(5_000);
+        let out = polish_gen4_i2v_prompt(&raw);
+        assert!(
+            out.len() <= PROMPT_TEXT_MAX_BYTES,
+            "polish output {} bytes exceeded cap {}",
+            out.len(),
+            PROMPT_TEXT_MAX_BYTES
+        );
+        // Suffix is never trimmed.
+        assert!(out.ends_with(MOTION_SUFFIX_GEN4));
+    }
+
+    #[test]
+    fn polish_gen4_i2v_prompt_preserves_utf8_boundaries() {
+        // Multi-byte chars at the trim point must not panic or produce
+        // invalid UTF-8 (em-dashes from Claude output are a common case).
+        let raw = "turn —".repeat(500);
+        let out = polish_gen4_i2v_prompt(&raw);
+        assert!(out.is_char_boundary(out.len())); // trivially true for &str
+        assert!(out.ends_with(MOTION_SUFFIX_GEN4));
+        assert!(out.len() <= PROMPT_TEXT_MAX_BYTES);
+    }
+
+    #[test]
+    fn polish_gen4_i2v_prompt_preserves_empty_input() {
+        let out = polish_gen4_i2v_prompt("");
+        // Empty input still produces the suffix — downstream constraint
+        // survives even when the planner emitted nothing.
+        assert_eq!(out, MOTION_SUFFIX_GEN4);
+    }
+
+    #[test]
+    fn polish_veo3_i2v_prompt_composes_all_five_parts() {
+        let out = polish_veo3_i2v_prompt(
+            "Medium shot, 35mm. The subject stands in a sunlit kitchen, shallow depth of field",
+            "slow push-in, the subject turns to face the window",
+            "warm Kodak Portra grade, morning light",
+            "Maybe I should just go",
+        );
+        assert!(out.contains("Medium shot, 35mm"));
+        assert!(out.contains("slow push-in"));
+        assert!(out.contains("Style: warm Kodak Portra grade"));
+        // Narration rendered as Veo-style spoken dialogue.
+        assert!(
+            out.contains("The subject says, \"Maybe I should just go\""),
+            "narration not woven as dialogue: {out}"
+        );
+        // Solo-subject constraint is the final clause (recency).
+        assert!(out.ends_with(SOLO_SUBJECT_CONSTRAINT_VEO));
+    }
+
+    #[test]
+    fn polish_veo3_i2v_prompt_skips_empty_segments() {
+        // Only scene + motion populated. No "Style:" label, no dialogue line.
+        let out = polish_veo3_i2v_prompt("a quiet kitchen at dawn", "slow push-in", "", "");
+        assert!(!out.contains("Style:"));
+        assert!(!out.contains("The subject says"));
+        assert!(out.contains("a quiet kitchen at dawn"));
+        assert!(out.contains("slow push-in"));
+        assert!(out.ends_with(SOLO_SUBJECT_CONSTRAINT_VEO));
+    }
+
+    #[test]
+    fn polish_veo3_i2v_prompt_all_empty_still_emits_constraint() {
+        let out = polish_veo3_i2v_prompt("", "", "", "");
+        // Zero content → just the solo-subject constraint; any provider
+        // downstream gets a valid promptText rather than an empty string.
+        assert_eq!(out, SOLO_SUBJECT_CONSTRAINT_VEO);
+    }
+
+    #[test]
+    fn polish_veo3_i2v_prompt_respects_byte_cap_and_preserves_constraint() {
+        let scene = "a".repeat(5_000);
+        let out = polish_veo3_i2v_prompt(&scene, "", "", "");
+        assert!(
+            out.len() <= PROMPT_TEXT_MAX_BYTES,
+            "veo polish output {} bytes exceeded cap {}",
+            out.len(),
+            PROMPT_TEXT_MAX_BYTES
+        );
+        // Constraint tail is never trimmed.
+        assert!(out.ends_with(SOLO_SUBJECT_CONSTRAINT_VEO));
+    }
+
+    #[test]
+    fn polish_veo3_i2v_prompt_preserves_utf8_boundaries() {
+        let scene = "turn —".repeat(500);
+        let out = polish_veo3_i2v_prompt(&scene, "", "", "");
+        assert!(out.is_char_boundary(out.len()));
+        assert!(out.ends_with(SOLO_SUBJECT_CONSTRAINT_VEO));
     }
 }

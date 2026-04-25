@@ -21,11 +21,19 @@ pub async fn get_scenario_plan(
     Extension(_): Extension<AuthUser>,
     Path(decision_id): Path<Uuid>,
 ) -> Response {
-    let sim = match state.simulation_repo.get_simulation_by_decision_id(decision_id).await {
+    let sim = match state
+        .simulation_repo
+        .get_simulation_by_decision_id(decision_id)
+        .await
+    {
         Ok(s) => s,
         Err(_) => return write_error(StatusCode::NOT_FOUND, "simulation not found"),
     };
-    let plan = match state.scenario_repo.get_scenario_plan_by_simulation_id(sim.id).await {
+    let plan = match state
+        .scenario_repo
+        .get_scenario_plan_by_simulation_id(sim.id)
+        .await
+    {
         Ok(p) => p,
         Err(_) => {
             return write_json(
@@ -60,7 +68,11 @@ pub async fn get_simulation_media(
     Extension(_): Extension<AuthUser>,
     Path(decision_id): Path<Uuid>,
 ) -> Response {
-    let sim = match state.simulation_repo.get_simulation_by_decision_id(decision_id).await {
+    let sim = match state
+        .simulation_repo
+        .get_simulation_by_decision_id(decision_id)
+        .await
+    {
         Ok(s) => s,
         Err(_) => return write_error(StatusCode::NOT_FOUND, "simulation not found"),
     };
@@ -89,12 +101,19 @@ pub async fn get_simulation_media(
     for m in media {
         let signed = state
             .object_store
-            .get_signed_url(&state.cfg.s3_bucket, &m.storage_path, Duration::from_secs(3600))
+            .get_signed_url(
+                &state.cfg.s3_bucket,
+                &m.storage_path,
+                Duration::from_secs(3600),
+            )
             .await
             .unwrap_or(m.storage_url.clone());
         // Frontend expects path as 'a'|'b'; DB stores 'path_a'|'path_b'.
         let db_path = m.scenario_path.clone().unwrap_or_default();
-        let normalized_path = db_path.strip_prefix("path_").unwrap_or(&db_path).to_string();
+        let normalized_path = db_path
+            .strip_prefix("path_")
+            .unwrap_or(&db_path)
+            .to_string();
         let phase = m.scenario_phase.unwrap_or(0);
         let status = status_map
             .get(&(db_path, phase))
@@ -118,11 +137,19 @@ pub async fn get_simulation_progress(
     Extension(_): Extension<AuthUser>,
     Path(decision_id): Path<Uuid>,
 ) -> Response {
-    let sim = match state.simulation_repo.get_simulation_by_decision_id(decision_id).await {
+    let sim = match state
+        .simulation_repo
+        .get_simulation_by_decision_id(decision_id)
+        .await
+    {
         Ok(s) => s,
         Err(_) => return write_json(StatusCode::OK, json!({ "status": "not_started" })),
     };
-    let components = state.components_repo.list_components(sim.id).await.unwrap_or_default();
+    let components = state
+        .components_repo
+        .list_components(sim.id)
+        .await
+        .unwrap_or_default();
 
     // Default stage entries so the frontend can always read `.status` without crashing.
     let pending = || json!({ "status": models::simulation_component_status::PENDING });
@@ -229,9 +256,17 @@ pub async fn get_simulation_progress(
 
 pub async fn get_assumptions(
     State(state): State<AppState>,
-    Extension(_): Extension<AuthUser>,
+    Extension(AuthUser(user_id)): Extension<AuthUser>,
     Path(sim_id): Path<Uuid>,
 ) -> Response {
+    let sim = match state.simulation_repo.get_simulation_by_id(sim_id).await {
+        Ok(s) => s,
+        Err(_) => return write_error(StatusCode::NOT_FOUND, "simulation not found"),
+    };
+    if sim.user_id != user_id {
+        return write_error(StatusCode::NOT_FOUND, "simulation not found");
+    }
+
     let assumptions = state
         .simulation_repo
         .get_assumptions_by_simulation_id(sim_id)
@@ -242,10 +277,8 @@ pub async fn get_assumptions(
         .get_risks_by_simulation_id(sim_id)
         .await
         .unwrap_or_default();
-    let (locked, used_at) = match state.simulation_repo.get_simulation_by_id(sim_id).await {
-        Ok(sim) => (sim.assumptions_calibrated_at.is_some(), sim.assumptions_calibrated_at),
-        Err(_) => (false, None),
-    };
+    let locked = sim.assumptions_calibrated_at.is_some();
+    let used_at = sim.assumptions_calibrated_at;
     write_json(
         StatusCode::OK,
         json!({
@@ -266,19 +299,38 @@ pub struct UpdateAssumptionReq {
 
 pub async fn update_assumption(
     State(state): State<AppState>,
-    Extension(_): Extension<AuthUser>,
-    Path((_sim_id, aid)): Path<(Uuid, Uuid)>,
+    Extension(AuthUser(user_id)): Extension<AuthUser>,
+    Path((sim_id, aid)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateAssumptionReq>,
 ) -> Response {
-    if let Err(e) = state
+    let sim = match state.simulation_repo.get_simulation_by_id(sim_id).await {
+        Ok(s) => s,
+        Err(_) => return write_error(StatusCode::NOT_FOUND, "simulation not found"),
+    };
+    if sim.user_id != user_id {
+        return write_error(StatusCode::NOT_FOUND, "simulation not found");
+    }
+
+    match state
         .simulation_repo
-        .update_assumption(aid, req.user_override_value.as_deref(), req.confidence)
+        .update_assumption_for_simulation(
+            aid,
+            sim_id,
+            req.user_override_value.as_deref(),
+            req.confidence,
+        )
         .await
     {
-        tracing::error!(error = ?e, "update_assumption: failed to update assumption");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to update assumption");
+        Ok(true) => write_json(StatusCode::OK, json!({"status": "ok"})),
+        Ok(false) => write_error(StatusCode::NOT_FOUND, "assumption not found"),
+        Err(e) => {
+            tracing::error!(error = ?e, "update_assumption: failed to update assumption");
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to update assumption",
+            )
+        }
     }
-    write_json(StatusCode::OK, json!({"status": "ok"}))
 }
 
 #[derive(Deserialize, Default)]
@@ -318,9 +370,19 @@ pub async fn calibrate_assumptions(
                 continue;
             }
         };
-        let a = match state.simulation_repo.get_assumption_by_id(uuid).await {
+        let a = match state
+            .simulation_repo
+            .get_assumption_by_id_for_simulation(uuid, sim.id)
+            .await
+        {
             Ok(a) => a,
             Err(_) => {
+                tracing::warn!(
+                    requested_assumption = %uuid,
+                    simulation_id = %sim.id,
+                    user_id = %user_id,
+                    "calibrate_assumptions: rejected missing or out-of-scope assumption_id"
+                );
                 skipped_ids.push(id_str.clone());
                 continue;
             }
@@ -493,10 +555,7 @@ fn apply_override_to_patch(
     }
 }
 
-async fn build_calibration_summary(
-    state: &AppState,
-    applied: &[(String, String)],
-) -> String {
+async fn build_calibration_summary(state: &AppState, applied: &[(String, String)]) -> String {
     if applied.is_empty() {
         return "No calibration changes applied.".to_string();
     }
@@ -573,7 +632,11 @@ pub async fn resimulate(
         let mut overrides: Vec<JsonValue> = Vec::new();
         for id in edited_ids {
             if let Ok(uuid) = Uuid::parse_str(&id) {
-                if let Ok(a) = state.simulation_repo.get_assumption_by_id(uuid).await {
+                if let Ok(a) = state
+                    .simulation_repo
+                    .get_assumption_by_id_for_simulation(uuid, parent.id)
+                    .await
+                {
                     overrides.push(json!({
                         "id": a.id,
                         "description": a.description,
@@ -581,6 +644,13 @@ pub async fn resimulate(
                         "confidence": a.confidence,
                         "original_confidence": a.original_confidence,
                     }));
+                } else {
+                    tracing::warn!(
+                        requested_assumption = %uuid,
+                        parent_simulation_id = %parent.id,
+                        user_id = %user_id,
+                        "resimulate: rejected missing or out-of-scope assumption_id"
+                    );
                 }
             }
         }
@@ -605,7 +675,11 @@ pub async fn resimulate(
     let life_context = crate::models::resolve_life_context_profile(&profile);
     let fact_sheet =
         crate::financial::build_financial_fact_sheet(&profile, &life_state, &financial_profile);
-    let decision = match state.decision_repo.get_decision_by_id(parent.decision_id).await {
+    let decision = match state
+        .decision_repo
+        .get_decision_by_id(parent.decision_id)
+        .await
+    {
         Ok(d) => d,
         Err(_) => {
             return write_error(StatusCode::NOT_FOUND, "parent decision not found");
@@ -707,7 +781,9 @@ pub async fn resimulate(
         .job_client
         .insert(
             jobs::KIND_SCENARIO_PLANNER,
-            &ScenarioPlannerArgs { simulation_id: new_sim_id },
+            &ScenarioPlannerArgs {
+                simulation_id: new_sim_id,
+            },
         )
         .await
     {
@@ -736,7 +812,11 @@ pub async fn get_all_user_assumptions(
         .unwrap_or_default();
     let mut all: Vec<JsonValue> = Vec::new();
     for d in decisions {
-        let sim = match state.simulation_repo.get_simulation_by_decision_id(d.id).await {
+        let sim = match state
+            .simulation_repo
+            .get_simulation_by_decision_id(d.id)
+            .await
+        {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -751,7 +831,10 @@ pub async fn get_all_user_assumptions(
         for a in assumptions {
             let mut obj = serde_json::to_value(&a).unwrap_or(JsonValue::Null);
             if let Some(map) = obj.as_object_mut() {
-                map.insert("decision_text".into(), JsonValue::String(d.decision_text.clone()));
+                map.insert(
+                    "decision_text".into(),
+                    JsonValue::String(d.decision_text.clone()),
+                );
                 map.insert("decision_id".into(), JsonValue::String(d.id.to_string()));
             }
             all.push(obj);
@@ -767,7 +850,7 @@ pub struct ClarifyInsightReq {
 
 pub async fn clarify_insight_assumption(
     State(state): State<AppState>,
-    Extension(_): Extension<AuthUser>,
+    Extension(AuthUser(user_id)): Extension<AuthUser>,
     Path(aid): Path<Uuid>,
     Json(req): Json<ClarifyInsightReq>,
 ) -> Response {
@@ -775,15 +858,21 @@ pub async fn clarify_insight_assumption(
     if override_val.is_empty() {
         return write_error(StatusCode::BAD_REQUEST, "user_override_value is required");
     }
-    if let Err(e) = state
+    match state
         .simulation_repo
-        .update_assumption(aid, Some(override_val), None)
+        .update_assumption_for_user(aid, user_id, Some(override_val), None)
         .await
     {
-        tracing::error!(error = ?e, "clarify_insight_assumption: failed to clarify assumption");
-        return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to clarify assumption");
+        Ok(true) => write_json(StatusCode::OK, json!({"status": "ok"})),
+        Ok(false) => write_error(StatusCode::NOT_FOUND, "assumption not found"),
+        Err(e) => {
+            tracing::error!(error = ?e, "clarify_insight_assumption: failed to clarify assumption");
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to clarify assumption",
+            )
+        }
     }
-    write_json(StatusCode::OK, json!({"status": "ok"}))
 }
 
 pub async fn get_decision_simulations(

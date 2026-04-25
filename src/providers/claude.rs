@@ -99,15 +99,25 @@ struct ApiErrorDetail {
 #[async_trait]
 impl TextProvider for ClaudeProvider {
     async fn generate_text(&self, req: &TextRequest) -> Result<TextResponse> {
-        let max_tokens = if req.max_tokens == 0 { 4096 } else { req.max_tokens };
-        let model = if req.model_id.is_empty() { &self.default_model } else { &req.model_id };
+        let max_tokens = if req.max_tokens == 0 {
+            4096
+        } else {
+            req.max_tokens
+        };
+        let model = if req.model_id.is_empty() {
+            &self.default_model
+        } else {
+            &req.model_id
+        };
 
         let mut user_content = Vec::with_capacity(2);
         if !req.cacheable_prefix.is_empty() {
             user_content.push(ContentBlock {
                 kind: "text".into(),
                 text: req.cacheable_prefix.clone(),
-                cache_control: Some(CacheControl { kind: "ephemeral".into() }),
+                cache_control: Some(CacheControl {
+                    kind: "ephemeral".into(),
+                }),
             });
         }
         user_content.push(ContentBlock {
@@ -172,9 +182,17 @@ impl TextProvider for ClaudeProvider {
                 content.push_str(&b.text);
             }
         }
-        let text = if req.json_mode { strip_markdown_fences(&content) } else { content };
+        let text = if req.json_mode {
+            strip_markdown_fences(&content)
+        } else {
+            content
+        };
 
-        let model_resp = if api_resp.model.is_empty() { model.clone() } else { api_resp.model };
+        let model_resp = if api_resp.model.is_empty() {
+            model.clone()
+        } else {
+            api_resp.model
+        };
         let total = api_resp.usage.input_tokens + api_resp.usage.output_tokens;
 
         Ok(TextResponse {

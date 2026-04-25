@@ -57,6 +57,13 @@ pub struct Config {
 
     pub scenario_planner_dev_phase_count: i32,
     pub simulation_video_clip_duration_secs: i32,
+
+    /// When true, character plate generation injects identity-stable hints
+    /// (age + bearing) derived from the user's profile into the Flux prompt.
+    /// When false (default), every user gets the static `CHARACTER_PLATE_PROMPT`.
+    /// Off by default until visual A/B confirms the dynamic prompt does not
+    /// cause likeness drift relative to the source photo.
+    pub enable_dynamic_character_plate: bool,
 }
 
 impl Config {
@@ -132,7 +139,10 @@ impl Config {
             s3_access_key: env_or_default("S3_ACCESS_KEY", ""),
             s3_secret_key: env_or_default("S3_SECRET_KEY", ""),
             s3_bucket: env_or_default("S3_BUCKET", "scout-media"),
-            character_palettes_bucket: env_or_default("CHARACTER_PALETTES_BUCKET", "character-palettes"),
+            character_palettes_bucket: env_or_default(
+                "CHARACTER_PALETTES_BUCKET",
+                "character-palettes",
+            ),
             flash_images_bucket: env_or_default("FLASH_IMAGES_BUCKET", "flash-images"),
             flash_audio_bucket: env_or_default("FLASH_AUDIO_BUCKET", "flash-audio"),
             s3_region: env_or_default("S3_REGION", "local"),
@@ -144,6 +154,8 @@ impl Config {
             log_llm_interaction: env_bool("LOG_LLM_INTERACTIONS", false),
             scenario_planner_dev_phase_count,
             simulation_video_clip_duration_secs,
+
+            enable_dynamic_character_plate: env_bool("ENABLE_DYNAMIC_CHARACTER_PLATE", false),
         };
 
         match cfg.text_provider.as_str() {
@@ -214,9 +226,10 @@ impl Config {
 }
 
 fn require_env(key: &str) -> String {
-    env::var(key).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| {
-        panic!("config: required environment variable {} is not set", key)
-    })
+    env::var(key)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| panic!("config: required environment variable {} is not set", key))
 }
 
 fn env_or_default(key: &str, fallback: &str) -> String {

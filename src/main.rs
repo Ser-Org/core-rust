@@ -5,8 +5,7 @@ use scout_core::{
     config::Config,
     db, jobs, logging, media,
     middleware::AuthConfig,
-    objectstore,
-    prompts,
+    objectstore, prompts,
     providers::{
         claude::ClaudeProvider, flux::FluxProvider, flux::MockFluxProvider, mock::*,
         ollama::OllamaProvider, runway::RunwayProvider, FlashImageProviderRef, ImageProviderRef,
@@ -102,7 +101,10 @@ async fn main() -> anyhow::Result<()> {
     let components_repo = Arc::new(repos::SimulationComponentsRepo::new(pool.clone()));
 
     let text_provider: TextProviderRef = match cfg.text_provider.as_str() {
-        "claude" => Arc::new(ClaudeProvider::new(cfg.claude_api_key.clone(), cfg.log_llm_interaction)),
+        "claude" => Arc::new(ClaudeProvider::new(
+            cfg.claude_api_key.clone(),
+            cfg.log_llm_interaction,
+        )),
         "ollama" => Arc::new(OllamaProvider::new(
             cfg.ollama_url.clone(),
             cfg.ollama_model.clone(),
@@ -111,11 +113,17 @@ async fn main() -> anyhow::Result<()> {
         _ => Arc::new(MockTextProvider::new()),
     };
     let video_provider: VideoProviderRef = match cfg.video_provider.as_str() {
-        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(
+            cfg.runway_api_key.clone(),
+            cfg.log_llm_interaction,
+        )),
         _ => Arc::new(MockVideoProvider::new("testdata/placeholder.mp4")),
     };
     let image_provider: ImageProviderRef = match cfg.video_provider.as_str() {
-        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(cfg.runway_api_key.clone(), cfg.log_llm_interaction)),
+        "runway" | "veo3" | "seedance2" => Arc::new(RunwayProvider::new(
+            cfg.runway_api_key.clone(),
+            cfg.log_llm_interaction,
+        )),
         _ => Arc::new(MockImageProvider::new()),
     };
     let flash_image_provider: FlashImageProviderRef = match cfg.flash_provider.as_str() {

@@ -20,7 +20,10 @@ pub async fn get_subscription(
         Ok(sub) => write_json(StatusCode::OK, sub),
         Err(e) => {
             tracing::error!(error = ?e, "get_subscription: failed to load subscription");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to load subscription")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to load subscription",
+            )
         }
     }
 }
@@ -31,12 +34,13 @@ pub async fn check_cinematic_entitlement(
 ) -> Response {
     match state.billing.check_cinematic_entitlement(user_id).await {
         Ok(()) => write_json(StatusCode::OK, json!({"entitled": true})),
-        Err(BillingError::Entitlement { code, message }) => {
-            write_billing_error(&code, &message)
-        }
+        Err(BillingError::Entitlement { code, message }) => write_billing_error(&code, &message),
         Err(e) => {
             tracing::error!(error = ?e, "check_cinematic_entitlement: entitlement check failed");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "entitlement check failed")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "entitlement check failed",
+            )
         }
     }
 }
@@ -51,7 +55,11 @@ pub async fn create_checkout_session(
     Extension(AuthUser(user_id)): Extension<AuthUser>,
     Json(req): Json<CheckoutReq>,
 ) -> Response {
-    match state.billing.create_checkout_session(user_id, &req.plan).await {
+    match state
+        .billing
+        .create_checkout_session(user_id, &req.plan)
+        .await
+    {
         Ok(url) => write_json(StatusCode::OK, json!({"url": url})),
         Err(BillingError::NotConfigured) => {
             write_error(StatusCode::SERVICE_UNAVAILABLE, "billing not configured")
@@ -59,7 +67,10 @@ pub async fn create_checkout_session(
         Err(BillingError::InvalidPlan) => write_error(StatusCode::BAD_REQUEST, "invalid plan"),
         Err(e) => {
             tracing::error!(error = ?e, "create_checkout_session: failed to create checkout");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create checkout")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create checkout",
+            )
         }
     }
 }
@@ -68,7 +79,11 @@ pub async fn create_extra_cinematic_checkout_session(
     State(state): State<AppState>,
     Extension(AuthUser(user_id)): Extension<AuthUser>,
 ) -> Response {
-    match state.billing.create_extra_cinematic_checkout_session(user_id).await {
+    match state
+        .billing
+        .create_extra_cinematic_checkout_session(user_id)
+        .await
+    {
         Ok(url) => write_json(StatusCode::OK, json!({"url": url})),
         Err(BillingError::NotConfigured) => {
             write_error(StatusCode::SERVICE_UNAVAILABLE, "billing not configured")
@@ -78,7 +93,10 @@ pub async fn create_extra_cinematic_checkout_session(
         }
         Err(e) => {
             tracing::error!(error = ?e, "create_extra_cinematic_checkout_session: failed to create checkout");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create checkout")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create checkout",
+            )
         }
     }
 }
@@ -97,7 +115,10 @@ pub async fn create_portal_session(
         }
         Err(e) => {
             tracing::error!(error = ?e, "create_portal_session: failed to create portal session");
-            write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to create portal session")
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create portal session",
+            )
         }
     }
 }

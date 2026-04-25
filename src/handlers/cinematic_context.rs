@@ -17,7 +17,10 @@ pub async fn get_status(
     Extension(AuthUser(user_id)): Extension<AuthUser>,
 ) -> Response {
     match state.user_repo.get_cinematic_context_status(user_id).await {
-        Ok(completed) => write_json(StatusCode::OK, json!({"cinematic_context_completed": completed})),
+        Ok(completed) => write_json(
+            StatusCode::OK,
+            json!({"cinematic_context_completed": completed}),
+        ),
         Err(e) => {
             tracing::error!(error = ?e, "get_status: failed to get status");
             write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to get status")
@@ -83,7 +86,11 @@ pub async fn post(
         tracing::error!(error = ?e, "post: failed to save");
         return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save");
     }
-    if let Err(e) = state.user_repo.upsert_cinematic_context(user_id, &input).await {
+    if let Err(e) = state
+        .user_repo
+        .upsert_cinematic_context(user_id, &input)
+        .await
+    {
         tracing::error!(error = ?e, "post: failed to save");
         return write_error(StatusCode::INTERNAL_SERVER_ERROR, "failed to save");
     }

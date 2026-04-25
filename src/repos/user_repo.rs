@@ -297,6 +297,24 @@ impl UserRepository {
         Ok(p)
     }
 
+    pub async fn get_photo_by_id_for_user(
+        &self,
+        photo_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<UserPhoto> {
+        let p = sqlx::query_as::<_, UserPhoto>(
+            "SELECT id, user_id, storage_url, storage_path, mime_type, is_primary, photo_type, created_at, flux_storage_url, flux_storage_path
+             FROM user_photos
+             WHERE id = $1 AND user_id = $2
+             LIMIT 1",
+        )
+        .bind(photo_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(p)
+    }
+
     pub async fn get_flux_photo_by_user_id(&self, user_id: Uuid) -> Result<UserPhoto> {
         let p = sqlx::query_as::<_, UserPhoto>(
             "SELECT id, user_id, storage_url, storage_path, mime_type, is_primary, photo_type, created_at, flux_storage_url, flux_storage_path
@@ -312,11 +330,12 @@ impl UserRepository {
     }
 
     pub async fn count_user_photos(&self, user_id: Uuid) -> Result<i64> {
-        let row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM user_photos WHERE user_id = $1 AND is_primary = true")
-                .bind(user_id)
-                .fetch_one(&self.pool)
-                .await?;
+        let row: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM user_photos WHERE user_id = $1 AND is_primary = true",
+        )
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
         Ok(row.0)
     }
 
@@ -326,7 +345,11 @@ impl UserRepository {
         age_bracket: &str,
         gender: &str,
     ) -> Result<()> {
-        let gender_opt = if gender.is_empty() { None } else { Some(gender) };
+        let gender_opt = if gender.is_empty() {
+            None
+        } else {
+            Some(gender)
+        };
         let res = sqlx::query(
             "UPDATE user_profiles
              SET age_bracket = $1,
@@ -519,7 +542,11 @@ impl UserRepository {
             }
         }
 
-        if let Some(rs) = profile.relationship_status.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(rs) = profile
+            .relationship_status
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        {
             if ls.relationship_status == "unknown" {
                 ls.relationship_status = rs.to_string();
             }
@@ -589,11 +616,7 @@ impl UserRepository {
         Ok(row.0.unwrap_or(JsonValue::Null))
     }
 
-    pub async fn set_suggested_first_what_if(
-        &self,
-        user_id: Uuid,
-        raw: &JsonValue,
-    ) -> Result<()> {
+    pub async fn set_suggested_first_what_if(&self, user_id: Uuid, raw: &JsonValue) -> Result<()> {
         let res = sqlx::query(
             "UPDATE user_profiles
              SET suggested_first_what_if = $1,
@@ -686,6 +709,23 @@ impl UserRepository {
         Ok(())
     }
 
+    /// Fetch the plate row by its id. The job handler uses this to read
+    /// `prompt_used` at generation time so the Flux prompt is exactly what
+    /// was claimed — independent of any later flag/profile changes.
+    pub async fn get_character_plate_by_id(&self, plate_id: Uuid) -> Result<CharacterPlate> {
+        let cp = sqlx::query_as::<_, CharacterPlate>(
+            "SELECT id, user_id, source_photo_id, storage_bucket, storage_url, storage_path, mime_type,
+                    prompt_used, status, attempt_count, last_error, last_attempt_at, created_at, updated_at
+             FROM character_plates
+             WHERE id = $1
+             LIMIT 1",
+        )
+        .bind(plate_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(cp)
+    }
+
     pub async fn get_ready_character_plate_by_user_id(
         &self,
         user_id: Uuid,
@@ -704,6 +744,31 @@ impl UserRepository {
         Ok(cp)
     }
 
+    pub async fn get_ready_character_plate_by_prompt(
+        &self,
+        user_id: Uuid,
+        source_photo_id: Uuid,
+        prompt: &str,
+    ) -> Result<CharacterPlate> {
+        let cp = sqlx::query_as::<_, CharacterPlate>(
+            "SELECT id, user_id, source_photo_id, storage_bucket, storage_url, storage_path, mime_type,
+                    prompt_used, status, attempt_count, last_error, last_attempt_at, created_at, updated_at
+             FROM character_plates
+             WHERE user_id = $1
+               AND source_photo_id = $2
+               AND prompt_hash = md5($3::text)
+               AND status = 'ready'
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .bind(user_id)
+        .bind(source_photo_id)
+        .bind(prompt)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(cp)
+    }
+
     pub async fn claim_character_plate_generation(
         &self,
         user_id: Uuid,
@@ -716,11 +781,12 @@ impl UserRepository {
             "SELECT id, user_id, source_photo_id, storage_bucket, storage_url, storage_path, mime_type,
                     prompt_used, status, attempt_count, last_error, last_attempt_at, created_at, updated_at
              FROM character_plates
-             WHERE user_id = $1 AND source_photo_id = $2
+             WHERE user_id = $1 AND source_photo_id = $2 AND prompt_hash = md5($3::text)
              FOR UPDATE",
         )
         .bind(user_id)
         .bind(source_photo_id)
+        .bind(prompt)
         .fetch_optional(&mut *tx)
         .await?;
 
@@ -743,10 +809,12 @@ impl UserRepository {
                     created_at: now,
                     updated_at: now,
                 };
-                sqlx::query(
+                let inserted = sqlx::query(
                     "INSERT INTO character_plates
                        (id, user_id, source_photo_id, prompt_used, status, attempt_count, last_attempt_at, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, now(), now(), now())",
+                     VALUES ($1, $2, $3, $4, $5, $6, now(), now(), now())
+                     ON CONFLICT (user_id, source_photo_id, prompt_hash) WHERE status != 'failed'
+                     DO NOTHING",
                 )
                 .bind(plate.id)
                 .bind(plate.user_id)
@@ -756,17 +824,32 @@ impl UserRepository {
                 .bind(plate.attempt_count)
                 .execute(&mut *tx)
                 .await?;
+                if inserted.rows_affected() == 0 {
+                    let existing = sqlx::query_as::<_, CharacterPlate>(
+                        "SELECT id, user_id, source_photo_id, storage_bucket, storage_url, storage_path, mime_type,
+                                prompt_used, status, attempt_count, last_error, last_attempt_at, created_at, updated_at
+                         FROM character_plates
+                         WHERE user_id = $1 AND source_photo_id = $2 AND prompt_hash = md5($3::text)",
+                    )
+                    .bind(user_id)
+                    .bind(source_photo_id)
+                    .bind(prompt)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    tx.commit().await?;
+                    return Ok((existing, false));
+                }
                 tx.commit().await?;
                 Ok((plate, true))
             }
             Some(mut plate) => {
                 match plate.status.as_str() {
                     "ready" => {
-                        if plate.storage_bucket.is_none()
+                        let storage_incomplete = plate.storage_bucket.is_none()
                             || plate.storage_path.is_none()
                             || plate.storage_url.is_none()
-                            || plate.mime_type.is_none()
-                        {
+                            || plate.mime_type.is_none();
+                        if storage_incomplete {
                             sqlx::query(
                                 "UPDATE character_plates SET status = $1, prompt_used = $2, storage_bucket = NULL, storage_url = NULL, storage_path = NULL, mime_type = NULL, attempt_count = attempt_count + 1, last_error = NULL, last_attempt_at = now(), updated_at = now() WHERE id = $3",
                             )
@@ -790,6 +873,7 @@ impl UserRepository {
                         Ok((plate, false))
                     }
                     "pending" | "generating" => {
+                        // Exact prompt already in flight; let it finish.
                         tx.commit().await?;
                         Ok((plate, false))
                     }

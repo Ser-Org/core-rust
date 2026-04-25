@@ -14,7 +14,11 @@ pub async fn get_simulation_status(
     Extension(AuthUser(_user_id)): Extension<AuthUser>,
     Path(decision_id): Path<Uuid>,
 ) -> Response {
-    let sim = match state.simulation_repo.get_simulation_by_decision_id(decision_id).await {
+    let sim = match state
+        .simulation_repo
+        .get_simulation_by_decision_id(decision_id)
+        .await
+    {
         Ok(s) => s,
         Err(_) => {
             return write_json(

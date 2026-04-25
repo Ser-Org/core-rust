@@ -90,7 +90,9 @@ struct SubmitRequest {
     input_image: String,
 }
 
-fn is_zero_u32(v: &u32) -> bool { *v == 0 }
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
 
 #[derive(Deserialize)]
 struct SubmitResponse {
@@ -202,10 +204,7 @@ impl FluxProvider {
             let dl = Client::builder().timeout(DOWNLOAD_TIMEOUT).build()?;
             let resp = dl.get(input).send().await?;
             if !resp.status().is_success() {
-                return Err(anyhow!(
-                    "flux: download input_image HTTP {}",
-                    resp.status()
-                ));
+                return Err(anyhow!("flux: download input_image HTTP {}", resp.status()));
             }
             let bytes = resp.bytes().await?;
             return Ok(B64.encode(&bytes));
@@ -221,21 +220,27 @@ impl FluxProvider {
     async fn submit_and_poll(&self, body: &SubmitRequest) -> Result<Vec<u8>> {
         let url = format!("{}{}", BASE_URL, MAX_ENDPOINT);
         // Scrub base64 input_image from logs (can be multi-MB) and cap body length.
-        let log_body = serde_json::to_value(body).ok().map(|mut v| {
-            if let Some(obj) = v.as_object_mut() {
-                if let Some(img) = obj.get("input_image").and_then(|v| v.as_str()) {
-                    if !img.is_empty() {
-                        obj.insert("input_image".into(), serde_json::json!(format!("<base64 {} bytes>", img.len())));
+        let log_body = serde_json::to_value(body)
+            .ok()
+            .map(|mut v| {
+                if let Some(obj) = v.as_object_mut() {
+                    if let Some(img) = obj.get("input_image").and_then(|v| v.as_str()) {
+                        if !img.is_empty() {
+                            obj.insert(
+                                "input_image".into(),
+                                serde_json::json!(format!("<base64 {} bytes>", img.len())),
+                            );
+                        }
                     }
                 }
-            }
-            let s = v.to_string();
-            if s.len() > 2048 {
-                format!("{}…[+{} bytes elided]", &s[..2048], s.len() - 2048)
-            } else {
-                s
-            }
-        }).unwrap_or_default();
+                let s = v.to_string();
+                if s.len() > 2048 {
+                    format!("{}…[+{} bytes elided]", &s[..2048], s.len() - 2048)
+                } else {
+                    s
+                }
+            })
+            .unwrap_or_default();
         tracing::info!(url = %url, request_body = %log_body, "flux: POST submit request");
         let started = Instant::now();
         let resp = self
@@ -348,7 +353,11 @@ impl FluxProvider {
                         raw_body = %truncate_log(&raw, 2048),
                         "flux: generation terminal failure"
                     );
-                    return Err(anyhow!("flux: generation {} (raw={})", parsed.status, truncate_log(&raw, 512)));
+                    return Err(anyhow!(
+                        "flux: generation {} (raw={})",
+                        parsed.status,
+                        truncate_log(&raw, 512)
+                    ));
                 }
                 _ => continue,
             }

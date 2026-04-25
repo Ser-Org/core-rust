@@ -191,7 +191,8 @@ impl SubscriptionRepository {
 
     pub async fn cancel_subscription(&self, stripe_subscription_id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.cancel_subscription_tx(&mut tx, stripe_subscription_id).await?;
+        self.cancel_subscription_tx(&mut tx, stripe_subscription_id)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -243,7 +244,8 @@ impl SubscriptionRepository {
 
     pub async fn set_stripe_customer_id(&self, user_id: Uuid, customer_id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.set_stripe_customer_id_tx(&mut tx, user_id, customer_id).await?;
+        self.set_stripe_customer_id_tx(&mut tx, user_id, customer_id)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -294,7 +296,9 @@ impl SubscriptionRepository {
         credits: i32,
     ) -> Result<Subscription> {
         let mut tx = self.pool.begin().await?;
-        let sub = self.add_extra_cinematic_credits_tx(&mut tx, user_id, credits).await?;
+        let sub = self
+            .add_extra_cinematic_credits_tx(&mut tx, user_id, credits)
+            .await?;
         tx.commit().await?;
         Ok(sub)
     }
@@ -398,9 +402,13 @@ impl SubscriptionRepository {
         &self,
         user_id: Uuid,
     ) -> std::result::Result<(), EntitlementError> {
-        let sub = self.ensure_free_subscription(user_id).await.map_err(|e| {
-            EntitlementError { code: "internal".into(), message: e.to_string() }
-        })?;
+        let sub = self
+            .ensure_free_subscription(user_id)
+            .await
+            .map_err(|e| EntitlementError {
+                code: "internal".into(),
+                message: e.to_string(),
+            })?;
 
         if sub.billing_active() && sub.cinematic_used < sub.cinematic_limit {
             return Ok(());
@@ -431,9 +439,12 @@ impl SubscriptionRepository {
         tx: &mut Transaction<'_, Postgres>,
         user_id: Uuid,
     ) -> std::result::Result<Subscription, EntitlementError> {
-        self.ensure_free_subscription_tx(tx, user_id).await.map_err(|e| {
-            EntitlementError { code: "internal".into(), message: e.to_string() }
-        })?;
+        self.ensure_free_subscription_tx(tx, user_id)
+            .await
+            .map_err(|e| EntitlementError {
+                code: "internal".into(),
+                message: e.to_string(),
+            })?;
         let sub = sqlx::query_as::<_, Subscription>(&format!(
             "SELECT {} FROM subscriptions WHERE user_id = $1 FOR UPDATE",
             COLUMNS
@@ -482,9 +493,13 @@ impl SubscriptionRepository {
         &self,
         user_id: Uuid,
     ) -> std::result::Result<(), EntitlementError> {
-        let sub = self.ensure_free_subscription(user_id).await.map_err(|e| {
-            EntitlementError { code: "internal".into(), message: e.to_string() }
-        })?;
+        let sub = self
+            .ensure_free_subscription(user_id)
+            .await
+            .map_err(|e| EntitlementError {
+                code: "internal".into(),
+                message: e.to_string(),
+            })?;
 
         if sub.billing_active() && sub.flash_used < sub.flash_limit {
             return Ok(());

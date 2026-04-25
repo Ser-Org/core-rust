@@ -21,7 +21,11 @@ pub async fn get_media(
     };
     let signed = state
         .object_store
-        .get_signed_url(&state.cfg.s3_bucket, &m.storage_path, Duration::from_secs(3600))
+        .get_signed_url(
+            &state.cfg.s3_bucket,
+            &m.storage_path,
+            Duration::from_secs(3600),
+        )
         .await
         .unwrap_or(m.storage_url.clone());
     write_json(

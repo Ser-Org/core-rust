@@ -166,7 +166,10 @@ pub struct LifeContextProfile {
 
 pub fn resolve_behavioral_profile(p: &UserProfile) -> BehavioralProfile {
     let r = |v: &Option<String>, d: &str| {
-        v.as_deref().filter(|s| !s.is_empty()).unwrap_or(d).to_string()
+        v.as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(d)
+            .to_string()
     };
     BehavioralProfile {
         risk_tolerance: r(&p.risk_tolerance, "moderate"),
@@ -179,7 +182,10 @@ pub fn resolve_behavioral_profile(p: &UserProfile) -> BehavioralProfile {
 
 pub fn resolve_financial_profile(p: &UserProfile) -> FinancialProfile {
     let r = |v: &Option<String>, d: &str| {
-        v.as_deref().filter(|s| !s.is_empty()).unwrap_or(d).to_string()
+        v.as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(d)
+            .to_string()
     };
     let liquid = p.liquid_net_worth_source.as_deref().unwrap_or("");
     let frac = match liquid {
@@ -541,8 +547,7 @@ pub struct Subscription {
 
 impl Subscription {
     pub fn billing_active(&self) -> bool {
-        self.status == subscription_status::ACTIVE
-            || self.status == subscription_status::TRIALING
+        self.status == subscription_status::ACTIVE || self.status == subscription_status::TRIALING
     }
     pub fn remaining_simulations(&self) -> i32 {
         (self.cinematic_limit - self.cinematic_used).max(0)
