@@ -12,7 +12,7 @@ pub struct SubscriptionRepository {
 const COLUMNS: &str = "id, user_id, stripe_customer_id, stripe_subscription_id,
     plan, status, cinematic_used, cinematic_limit,
     text_resim_used, text_resim_limit, extra_cinematic_credits,
-    flash_used, flash_limit,
+    flash_used, flash_limit, extra_whatif_credits,
     period_start, period_end,
     cancel_at_period_end, created_at, updated_at";
 
@@ -65,8 +65,8 @@ impl SubscriptionRepository {
             "INSERT INTO subscriptions
                 (id, user_id, plan, status, cinematic_used, cinematic_limit,
                  text_resim_used, text_resim_limit, extra_cinematic_credits,
-                 flash_used, flash_limit)
-             VALUES ($1, $2, $3, 'active', 0, $4, 0, 0, 0, 0, $5)
+                 flash_used, flash_limit, extra_whatif_credits)
+             VALUES ($1, $2, $3, 'active', 0, $4, 0, 0, 0, 0, $5, 0)
              ON CONFLICT (user_id) DO UPDATE SET updated_at = now()
              RETURNING {}",
             COLUMNS
@@ -92,8 +92,8 @@ impl SubscriptionRepository {
             "INSERT INTO subscriptions
                 (id, user_id, plan, status, cinematic_used, cinematic_limit,
                  text_resim_used, text_resim_limit, extra_cinematic_credits,
-                 flash_used, flash_limit)
-             VALUES ($1, $2, $3, 'active', 0, $4, 0, 0, 0, 0, $5)
+                 flash_used, flash_limit, extra_whatif_credits)
+             VALUES ($1, $2, $3, 'active', 0, $4, 0, 0, 0, 0, $5, 0)
              ON CONFLICT (user_id) DO UPDATE SET updated_at = now()
              RETURNING {}",
             COLUMNS
@@ -156,9 +156,9 @@ impl SubscriptionRepository {
                 (id, user_id, stripe_customer_id, stripe_subscription_id,
                  plan, status, cinematic_used, cinematic_limit,
                  text_resim_used, text_resim_limit, extra_cinematic_credits,
-                 flash_used, flash_limit,
+                 flash_used, flash_limit, extra_whatif_credits,
                  period_start, period_end, cancel_at_period_end)
-             VALUES ($1, $2, $3, $4, $5, $6, 0, $7, 0, 0, 0, 0, $8, $9, $10, $11)
+             VALUES ($1, $2, $3, $4, $5, $6, 0, $7, 0, 0, 0, 0, $8, 0, $9, $10, $11)
              ON CONFLICT (user_id) DO UPDATE SET
                 stripe_customer_id     = EXCLUDED.stripe_customer_id,
                 stripe_subscription_id = EXCLUDED.stripe_subscription_id,
@@ -327,6 +327,30 @@ impl SubscriptionRepository {
         Ok(sub)
     }
 
+    pub async fn add_extra_whatif_credits_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        user_id: Uuid,
+        credits: i32,
+    ) -> Result<Subscription> {
+        if credits <= 0 {
+            return self.ensure_free_subscription_tx(tx, user_id).await;
+        }
+        self.ensure_free_subscription_tx(tx, user_id).await?;
+        let sub = sqlx::query_as::<_, Subscription>(&format!(
+            "UPDATE subscriptions
+             SET extra_whatif_credits = extra_whatif_credits + $1, updated_at = now()
+             WHERE user_id = $2
+             RETURNING {}",
+            COLUMNS
+        ))
+        .bind(credits)
+        .bind(user_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        Ok(sub)
+    }
+
     /// Consume a cinematic entitlement inside a transaction.
     /// Returns `(sub, used_extra_credit)` on success, or an `EntitlementError` via Err.
     pub async fn consume_cinematic_entitlement_tx(
@@ -471,6 +495,20 @@ impl SubscriptionRepository {
             })?;
             return Ok(updated);
         }
+        if sub.extra_whatif_credits > 0 {
+            let updated = sqlx::query_as::<_, Subscription>(&format!(
+                "UPDATE subscriptions SET extra_whatif_credits = extra_whatif_credits - 1, updated_at = now() WHERE user_id = $1 RETURNING {}",
+                COLUMNS
+            ))
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| EntitlementError {
+                code: "internal".into(),
+                message: e.to_string(),
+            })?;
+            return Ok(updated);
+        }
         if sub.plan == plan_type::FREE {
             return Err(EntitlementError {
                 code: entitlement_code::FLASH_LIMIT_REACHED.into(),
@@ -502,6 +540,9 @@ impl SubscriptionRepository {
             })?;
 
         if sub.billing_active() && sub.flash_used < sub.flash_limit {
+            return Ok(());
+        }
+        if sub.extra_whatif_credits > 0 {
             return Ok(());
         }
         if sub.plan == plan_type::FREE {

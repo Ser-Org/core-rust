@@ -155,6 +155,8 @@ async fn main() -> anyhow::Result<()> {
         cfg.stripe_pro_price_id.clone(),
         cfg.stripe_family_price_id.clone(),
         cfg.stripe_extra_cinematic_price_id.clone(),
+        cfg.stripe_extra_whatif_price_id.clone(),
+        cfg.stripe_whatif_10pack_price_id.clone(),
     ));
 
     let media_pipeline = Arc::new(media::MediaPipeline::new(

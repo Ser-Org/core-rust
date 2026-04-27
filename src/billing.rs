@@ -25,6 +25,8 @@ pub struct BillingService {
     pub pro_price_id: String,
     pub family_price_id: String,
     pub extra_cinematic_price_id: String,
+    pub extra_whatif_price_id: String,
+    pub whatif_10pack_price_id: String,
     http: Client,
 }
 
@@ -56,6 +58,8 @@ impl BillingService {
         pro_price_id: String,
         family_price_id: String,
         extra_cinematic_price_id: String,
+        extra_whatif_price_id: String,
+        whatif_10pack_price_id: String,
     ) -> Self {
         Self {
             pool,
@@ -68,6 +72,8 @@ impl BillingService {
             pro_price_id,
             family_price_id,
             extra_cinematic_price_id,
+            extra_whatif_price_id,
+            whatif_10pack_price_id,
             http: Client::new(),
         }
     }
@@ -85,6 +91,14 @@ impl BillingService {
 
     fn extra_checkout_configured(&self) -> bool {
         self.plan_checkout_configured() && !self.extra_cinematic_price_id.is_empty()
+    }
+
+    fn extra_whatif_checkout_configured(&self) -> bool {
+        self.plan_checkout_configured() && !self.extra_whatif_price_id.is_empty()
+    }
+
+    fn whatif_10pack_checkout_configured(&self) -> bool {
+        self.plan_checkout_configured() && !self.whatif_10pack_price_id.is_empty()
     }
 
     fn webhook_configured(&self) -> bool {
@@ -238,6 +252,124 @@ impl BillingService {
                     (
                         "payment_intent_data[metadata][purchase_kind]",
                         "extra_cinematic".into(),
+                    ),
+                ],
+            )
+            .await
+            .map_err(BillingError::Other)?;
+        Ok(resp.url)
+    }
+
+    pub async fn create_extra_whatif_checkout_session(
+        &self,
+        user_id: Uuid,
+    ) -> Result<String, BillingError> {
+        if !self.extra_whatif_checkout_configured() {
+            return Err(BillingError::NotConfigured);
+        }
+        let sub = self
+            .subscription_repo
+            .ensure_free_subscription(user_id)
+            .await
+            .map_err(|e| BillingError::Other(anyhow!(e)))?;
+        if sub.plan == plan_type::FREE || !sub.billing_active() {
+            return Err(BillingError::PaidPlanRequired);
+        }
+        let customer_id = self.ensure_stripe_customer(user_id).await?;
+
+        #[derive(Deserialize)]
+        struct Session {
+            url: String,
+        }
+        let resp: Session = self
+            .stripe_post(
+                "/checkout/sessions",
+                vec![
+                    ("mode", "payment".into()),
+                    ("customer", customer_id),
+                    ("client_reference_id", user_id.to_string()),
+                    (
+                        "success_url",
+                        format!("{}/billing/success?kind=extra-whatif", self.app_url),
+                    ),
+                    (
+                        "cancel_url",
+                        format!(
+                            "{}/billing?checkout=canceled&kind=extra-whatif",
+                            self.app_url
+                        ),
+                    ),
+                    ("line_items[0][price]", self.extra_whatif_price_id.clone()),
+                    ("line_items[0][quantity]", "1".into()),
+                    ("metadata[user_id]", user_id.to_string()),
+                    ("metadata[credits]", "1".into()),
+                    ("metadata[purchase_kind]", "extra_whatif".into()),
+                    (
+                        "payment_intent_data[metadata][user_id]",
+                        user_id.to_string(),
+                    ),
+                    (
+                        "payment_intent_data[metadata][purchase_kind]",
+                        "extra_whatif".into(),
+                    ),
+                ],
+            )
+            .await
+            .map_err(BillingError::Other)?;
+        Ok(resp.url)
+    }
+
+    pub async fn create_whatif_10pack_checkout_session(
+        &self,
+        user_id: Uuid,
+    ) -> Result<String, BillingError> {
+        if !self.whatif_10pack_checkout_configured() {
+            return Err(BillingError::NotConfigured);
+        }
+        let sub = self
+            .subscription_repo
+            .ensure_free_subscription(user_id)
+            .await
+            .map_err(|e| BillingError::Other(anyhow!(e)))?;
+        if sub.plan == plan_type::FREE || !sub.billing_active() {
+            return Err(BillingError::PaidPlanRequired);
+        }
+        let customer_id = self.ensure_stripe_customer(user_id).await?;
+
+        #[derive(Deserialize)]
+        struct Session {
+            url: String,
+        }
+        let resp: Session = self
+            .stripe_post(
+                "/checkout/sessions",
+                vec![
+                    ("mode", "payment".into()),
+                    ("customer", customer_id),
+                    ("client_reference_id", user_id.to_string()),
+                    (
+                        "success_url",
+                        format!("{}/billing/success?kind=whatif-10pack", self.app_url),
+                    ),
+                    (
+                        "cancel_url",
+                        format!(
+                            "{}/billing?checkout=canceled&kind=whatif-10pack",
+                            self.app_url
+                        ),
+                    ),
+                    ("line_items[0][price]", self.whatif_10pack_price_id.clone()),
+                    ("line_items[0][quantity]", "1".into()),
+                    ("metadata[user_id]", user_id.to_string()),
+                    ("metadata[credits]", "10".into()),
+                    ("metadata[purchase_kind]", "whatif_10pack".into()),
+                    (
+                        "payment_intent_data[metadata][user_id]",
+                        user_id.to_string(),
+                    ),
+                    (
+                        "payment_intent_data[metadata][purchase_kind]",
+                        "whatif_10pack".into(),
                     ),
                 ],
             )
@@ -420,6 +552,21 @@ impl BillingService {
             if paid {
                 self.subscription_repo
                     .add_extra_cinematic_credits_tx(tx, user_id, 1)
+                    .await
+                    .map_err(|e| BillingError::Other(anyhow!(e)))?;
+            }
+        }
+        if kind == "extra_whatif" || kind == "whatif_10pack" {
+            let paid = obj.get("payment_status").and_then(|v| v.as_str()) == Some("paid");
+            if paid {
+                let credits = obj
+                    .get("metadata")
+                    .and_then(|m| m.get("credits"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(if kind == "whatif_10pack" { 10 } else { 1 });
+                self.subscription_repo
+                    .add_extra_whatif_credits_tx(tx, user_id, credits)
                     .await
                     .map_err(|e| BillingError::Other(anyhow!(e)))?;
             }

@@ -538,6 +538,7 @@ pub struct Subscription {
     pub extra_cinematic_credits: i32,
     pub flash_used: i32,
     pub flash_limit: i32,
+    pub extra_whatif_credits: i32,
     pub period_start: Option<DateTime<Utc>>,
     pub period_end: Option<DateTime<Utc>>,
     pub cancel_at_period_end: bool,

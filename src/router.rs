@@ -155,6 +155,14 @@ pub fn build_router(state: AppState, auth_cfg: AuthConfig) -> Router {
             post(billing::create_extra_cinematic_checkout_session),
         )
         .route(
+            "/api/v1/billing/checkout/extra-whatif",
+            post(billing::create_extra_whatif_checkout_session),
+        )
+        .route(
+            "/api/v1/billing/checkout/whatif-10pack",
+            post(billing::create_whatif_10pack_checkout_session),
+        )
+        .route(
             "/api/v1/billing/portal",
             post(billing::create_portal_session),
         )

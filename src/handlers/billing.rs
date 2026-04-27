@@ -101,6 +101,58 @@ pub async fn create_extra_cinematic_checkout_session(
     }
 }
 
+pub async fn create_extra_whatif_checkout_session(
+    State(state): State<AppState>,
+    Extension(AuthUser(user_id)): Extension<AuthUser>,
+) -> Response {
+    match state
+        .billing
+        .create_extra_whatif_checkout_session(user_id)
+        .await
+    {
+        Ok(url) => write_json(StatusCode::OK, json!({"url": url})),
+        Err(BillingError::NotConfigured) => {
+            write_error(StatusCode::SERVICE_UNAVAILABLE, "billing not configured")
+        }
+        Err(BillingError::PaidPlanRequired) => {
+            write_error(StatusCode::PAYMENT_REQUIRED, "active paid plan required")
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "create_extra_whatif_checkout_session: failed to create checkout");
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create checkout",
+            )
+        }
+    }
+}
+
+pub async fn create_whatif_10pack_checkout_session(
+    State(state): State<AppState>,
+    Extension(AuthUser(user_id)): Extension<AuthUser>,
+) -> Response {
+    match state
+        .billing
+        .create_whatif_10pack_checkout_session(user_id)
+        .await
+    {
+        Ok(url) => write_json(StatusCode::OK, json!({"url": url})),
+        Err(BillingError::NotConfigured) => {
+            write_error(StatusCode::SERVICE_UNAVAILABLE, "billing not configured")
+        }
+        Err(BillingError::PaidPlanRequired) => {
+            write_error(StatusCode::PAYMENT_REQUIRED, "active paid plan required")
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "create_whatif_10pack_checkout_session: failed to create checkout");
+            write_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to create checkout",
+            )
+        }
+    }
+}
+
 pub async fn create_portal_session(
     State(state): State<AppState>,
     Extension(AuthUser(user_id)): Extension<AuthUser>,
